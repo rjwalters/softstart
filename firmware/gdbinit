@@ -1,0 +1,61 @@
+# GDB init file for STM32G031 debugging
+# Usage: arm-none-eabi-gdb -x gdbinit build/softstart.elf
+
+# Connect to OpenOCD
+target extended-remote :3333
+
+# Reset and halt the target
+monitor reset halt
+
+# Load the program
+load
+
+# Set a breakpoint at main
+break main
+
+# Display registers on stop
+define hook-stop
+    info registers
+end
+
+# Useful commands:
+# continue (c)     - run until next breakpoint
+# step (s)         - step into function
+# next (n)         - step over function
+# finish           - run until current function returns
+# print var        - print variable value
+# x/10xw 0x20000000 - examine 10 words at address
+# info break       - list breakpoints
+# delete 1         - delete breakpoint 1
+# bt               - backtrace (call stack)
+# monitor reset    - reset the target
+
+# Peripheral register helpers
+define show_gpioa
+    printf "GPIOA->MODER:  0x%08x\n", *(uint32_t*)0x50000000
+    printf "GPIOA->ODR:    0x%08x\n", *(uint32_t*)0x50000014
+    printf "GPIOA->IDR:    0x%08x\n", *(uint32_t*)0x50000010
+end
+
+define show_adc
+    printf "ADC1->ISR:     0x%08x\n", *(uint32_t*)0x40012400
+    printf "ADC1->CR:      0x%08x\n", *(uint32_t*)0x40012408
+    printf "ADC1->DR:      0x%08x\n", *(uint32_t*)0x40012440
+end
+
+define show_tim3
+    printf "TIM3->CR1:     0x%08x\n", *(uint32_t*)0x40000400
+    printf "TIM3->CNT:     0x%08x\n", *(uint32_t*)0x40000424
+    printf "TIM3->CCR1:    0x%08x\n", *(uint32_t*)0x40000434
+    printf "TIM3->CCR2:    0x%08x\n", *(uint32_t*)0x40000438
+end
+
+define show_state
+    printf "g_state:       %d\n", g_state
+    printf "g_fault:       %d\n", g_fault
+    printf "g_systick_ms:  %d\n", g_systick_ms
+    printf "g_zc_polarity: %d\n", g_zc_polarity
+end
+
+# Continue to main
+continue
