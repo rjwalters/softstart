@@ -1,0 +1,7 @@
+numpy
+mypy
+scipy
+isort
+black
+matplotlib
+kicad-tools[parts]

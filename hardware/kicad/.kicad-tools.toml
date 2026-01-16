@@ -1,0 +1,23 @@
+# kicad-tools configuration for Generator Soft-Start project
+
+[defaults]
+manufacturer = "jlcpcb"
+format = "text"
+
+[drc]
+strict = true
+layers = 2
+
+[export]
+output_dir = "production"
+include_dnp = false
+
+[route]
+strategy = "negotiated"
+trace_width = 0.3    # mm, default for signals
+clearance = 0.2      # mm
+via_drill = 0.3      # mm
+via_diameter = 0.6   # mm
+
+[parts]
+cache_ttl_days = 7
