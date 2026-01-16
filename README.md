@@ -110,7 +110,7 @@ softstart/
 
 ## Documentation
 
-- [Design Specification](hardware/design_spec.md) - Complete technical specification
+- [Project Specification](hardware/kicad/project.kct) - Complete technical specification (kicad-tools format)
 - [Design Evolution](docs/design_evolution.md) - How we explored different approaches
 
 ## License
