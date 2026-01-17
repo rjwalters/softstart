@@ -253,15 +253,16 @@ def create_softstart_schematic():
         rotation=90,
         footprint="Resistor_SMD:R_0805_2012Metric"
     )
+    # Place pull-up resistor ABOVE the H11AA1 to route vertically down to output
     r_zc_pull = sch.add_symbol(
         lib_id="Device:R",
-        x=SENSE_X - 30, y=SENSE_Y - 15,
+        x=SENSE_X - 40, y=SENSE_Y - 30,  # Above and left of H11AA1
         ref="R3", value="10k",
         rotation=0,
         footprint="Resistor_SMD:R_0805_2012Metric"
     )
 
-    sch.add_label("ZC_OUT", SENSE_X - 25, SENSE_Y)
+    sch.add_label("ZC_OUT", SENSE_X - 35, SENSE_Y - 20)
 
     # =========================================================================
     # Section 6: Current Sensing with Hardware OCP
@@ -855,11 +856,11 @@ def create_softstart_schematic():
     wire(ac_n_junc_x, j1_p2[1], j2_p2[0], j1_p2[1])
     wire(j2_p2[0], j1_p2[1], j2_p2[0], j2_p2[1])
 
-    # Move labels to wire intersections (at different X positions now)
+    # Move labels to wire intersections - use global labels for AC connections
     sch.remove_label("AC_L")
     sch.remove_label("AC_N")
-    sch.add_label("AC_L", ac_l_junc_x, j1_p1[1])
-    sch.add_label("AC_N", ac_n_junc_x, j1_p2[1])
+    sch.add_global_label("AC_L", ac_l_junc_x, j1_p1[1], shape="passive")
+    sch.add_global_label("AC_N", ac_n_junc_x, j1_p2[1], shape="passive")
 
     # -------------------------------------------------------------------------
     # 12V Power Supply wiring
@@ -885,11 +886,11 @@ def create_softstart_schematic():
     c9_p1 = c_12v_out.pin_position("1")
     c9_p2 = c_12v_out.pin_position("2")
 
-    # Wire bridge AC inputs to AC_L and AC_N labels
+    # Wire bridge AC inputs - use global labels
     wire(bridge_ac1[0] - 5, bridge_ac1[1], bridge_ac1[0], bridge_ac1[1])
-    sch.add_label("AC_L", bridge_ac1[0] - 5, bridge_ac1[1])
+    sch.add_global_label("AC_L", bridge_ac1[0] - 5, bridge_ac1[1], shape="passive")
     wire(bridge_ac2[0] + 5, bridge_ac2[1], bridge_ac2[0], bridge_ac2[1])
-    sch.add_label("AC_N", bridge_ac2[0] + 5, bridge_ac2[1])
+    sch.add_global_label("AC_N", bridge_ac2[0] + 5, bridge_ac2[1], shape="passive")
 
     # Wire bridge+ -> C8.1 -> L7812.VI
     wire(bridge_pos[0], bridge_pos[1], c8_p1[0], bridge_pos[1])
@@ -1118,33 +1119,40 @@ def create_softstart_schematic():
     wire(zc_cathode1[0], zc_cathode1[1], zc_cathode1[0], r2_p1[1])
     wire(zc_cathode1[0], r2_p1[1], r2_p1[0], r2_p1[1])
 
-    # AC input labels for ZC - at the outer ends of the resistor chain
+    # AC input labels for ZC - use global labels to connect to AC section by name
     wire(r1_p1[0] - 5, r1_p1[1], r1_p1[0], r1_p1[1])
-    sch.add_label("AC_L", r1_p1[0] - 5, r1_p1[1])
+    sch.add_global_label("AC_L", r1_p1[0] - 5, r1_p1[1], shape="input")
     wire(r2_p2[0], r2_p2[1], r2_p2[0] + 5, r2_p2[1])
-    sch.add_label("AC_N", r2_p2[0] + 5, r2_p2[1])
+    sch.add_global_label("AC_N", r2_p2[0] + 5, r2_p2[1], shape="input")
 
-    # Wire pull-up resistor and output
-    wire(r3_p2[0], r3_p2[1], zc_out[0], r3_p2[1])
-    wire(zc_out[0], r3_p2[1], zc_out[0], zc_out[1])
+    # Wire pull-up resistor to ZC output
+    # Pull-up R3 is at (160, 110) - above and left of H11AA1 output at (157.48, 137.16)
+    # Route: r3_p2 -> down to a safe Y level -> right to zc_out X -> down to zc_out
+    # Safe route: avoid Y=132 (anode) and Y=148 (cathode)
+    wire(r3_p2[0], r3_p2[1], r3_p2[0], r3_p2[1] + 5)  # short vertical stub from pull-up
+    wire(r3_p2[0], r3_p2[1] + 5, zc_out[0], r3_p2[1] + 5)  # horizontal at safe Y level (~115)
+    wire(zc_out[0], r3_p2[1] + 5, zc_out[0], zc_out[1])  # vertical down to zc_out
     sch.add_power("power:+3.3V", r3_p1[0], r3_p1[1] - 5)
     wire(r3_p1[0], r3_p1[1] - 5, r3_p1[0], r3_p1[1])
 
-    # ZC output label
+    # ZC output - add global label at the junction (same wire as pull-up connection)
+    # Place label where the horizontal wire meets the vertical segment
     sch.remove_label("ZC_OUT")
-    wire(zc_out[0], zc_out[1], zc_out[0] + 5, zc_out[1])
-    sch.add_label("ZC_OUT", zc_out[0] + 5, zc_out[1])
+    sch.add_global_label("ZC_OUT", zc_out[0], r3_p2[1] + 5, shape="output")
 
-    # ZC power
-    sch.add_power("power:+3.3V", zc_vcc[0], zc_vcc[1] - 5)
-    wire(zc_vcc[0], zc_vcc[1] - 5, zc_vcc[0], zc_vcc[1])
+    # ZC power - VCC offset to the right to avoid crossing output wire
+    sch.add_power("power:+3.3V", zc_vcc[0] + 10, zc_vcc[1] - 5)
+    wire(zc_vcc[0] + 10, zc_vcc[1] - 5, zc_vcc[0] + 10, zc_vcc[1])
+    wire(zc_vcc[0] + 10, zc_vcc[1], zc_vcc[0], zc_vcc[1])
     sch.add_power("power:GND", zc_gnd[0], zc_gnd[1] + 5)
     wire(zc_gnd[0], zc_gnd[1], zc_gnd[0], zc_gnd[1] + 5)
 
-    # Wire ZC_OUT to MCU (PA0) - PA0 is on right side
+    # Wire ZC_OUT to MCU (PA0) - use global label to avoid wire crossing
     mcu_pa0 = u_mcu.pin_position("PA0")
-    wire(mcu_pa0[0], mcu_pa0[1], label_x_right, mcu_pa0[1])
-    sch.add_label("ZC_OUT", label_x_right, mcu_pa0[1])
+    # Short stub wire from pin, then global label (connects by name to ZC section)
+    stub_len = 5 if mcu_pa0[0] > MCU_X else -5  # Stub toward outside of MCU
+    wire(mcu_pa0[0], mcu_pa0[1], mcu_pa0[0] + stub_len, mcu_pa0[1])
+    sch.add_global_label("ZC_OUT", mcu_pa0[0] + stub_len, mcu_pa0[1], shape="input")
 
     # -------------------------------------------------------------------------
     # Voltage dividers wiring
@@ -1176,14 +1184,15 @@ def create_softstart_schematic():
     vsc_pos_mid = r_vsc_p1.pin_position("2")
     vsc_neg_mid = r_vsc_n1.pin_position("2")
 
+    # Voltage divider outputs - use global labels to connect to MCU
     wire(vbus_mid[0], vbus_mid[1], vbus_mid[0] + 5, vbus_mid[1])
-    sch.add_label("V_BUS", vbus_mid[0] + 5, vbus_mid[1])
+    sch.add_global_label("V_BUS", vbus_mid[0] + 5, vbus_mid[1], shape="output")
 
     wire(vsc_pos_mid[0], vsc_pos_mid[1], vsc_pos_mid[0] + 5, vsc_pos_mid[1])
-    sch.add_label("V_SC_POS", vsc_pos_mid[0] + 5, vsc_pos_mid[1])
+    sch.add_global_label("V_SC_POS", vsc_pos_mid[0] + 5, vsc_pos_mid[1], shape="output")
 
     wire(vsc_neg_mid[0], vsc_neg_mid[1], vsc_neg_mid[0] + 5, vsc_neg_mid[1])
-    sch.add_label("V_SC_NEG", vsc_neg_mid[0] + 5, vsc_neg_mid[1])
+    sch.add_global_label("V_SC_NEG", vsc_neg_mid[0] + 5, vsc_neg_mid[1], shape="output")
 
     # GND for voltage dividers
     vbus2_p2 = r_vbus2.pin_position("2")
@@ -1203,17 +1212,21 @@ def create_softstart_schematic():
         """Return label X - always use right side to avoid wire crossings"""
         return label_x_right  # Always route right to avoid AC section wires
 
+    # ADC inputs - use global labels with short stubs to avoid wire crossings
     mcu_pa1 = u_mcu.pin_position("PA1")
-    wire(mcu_pa1[0], mcu_pa1[1], mcu_label_x(mcu_pa1), mcu_pa1[1])
-    sch.add_label("V_BUS", mcu_label_x(mcu_pa1), mcu_pa1[1])
+    stub = 5 if mcu_pa1[0] > MCU_X else -5
+    wire(mcu_pa1[0], mcu_pa1[1], mcu_pa1[0] + stub, mcu_pa1[1])
+    sch.add_global_label("V_BUS", mcu_pa1[0] + stub, mcu_pa1[1], shape="input")
 
     mcu_pa4 = u_mcu.pin_position("PA4")
-    wire(mcu_pa4[0], mcu_pa4[1], mcu_label_x(mcu_pa4), mcu_pa4[1])
-    sch.add_label("V_SC_POS", mcu_label_x(mcu_pa4), mcu_pa4[1])
+    stub = 5 if mcu_pa4[0] > MCU_X else -5
+    wire(mcu_pa4[0], mcu_pa4[1], mcu_pa4[0] + stub, mcu_pa4[1])
+    sch.add_global_label("V_SC_POS", mcu_pa4[0] + stub, mcu_pa4[1], shape="input")
 
     mcu_pa5 = u_mcu.pin_position("PA5")
-    wire(mcu_pa5[0], mcu_pa5[1], mcu_label_x(mcu_pa5), mcu_pa5[1])
-    sch.add_label("V_SC_NEG", mcu_label_x(mcu_pa5), mcu_pa5[1])
+    stub = 5 if mcu_pa5[0] > MCU_X else -5
+    wire(mcu_pa5[0], mcu_pa5[1], mcu_pa5[0] + stub, mcu_pa5[1])
+    sch.add_global_label("V_SC_NEG", mcu_pa5[0] + stub, mcu_pa5[1], shape="input")
 
     # No-connect flags for unused MCU pins
     mcu_pc15 = u_mcu.pin_position("PC15")
@@ -1263,15 +1276,16 @@ def create_softstart_schematic():
     wire(c4_p2[0], c4_p2[1], c4_p2[0], ina_gnd[1] + 5)
     wire(c4_p2[0], ina_gnd[1] + 5, ina_gnd[0], ina_gnd[1] + 5)  # Horizontal to connect C4 to GND
 
-    # I_SENSE output label
+    # I_SENSE output - use global label to connect to MCU and OCP without wire crossings
     sch.remove_label("I_SENSE")
     wire(ina_out[0], ina_out[1], ina_out[0] + 5, ina_out[1])
-    sch.add_label("I_SENSE", ina_out[0] + 5, ina_out[1])
+    sch.add_global_label("I_SENSE", ina_out[0] + 5, ina_out[1], shape="output")
 
-    # Wire I_SENSE to MCU ADC
+    # Wire I_SENSE to MCU ADC - use global label
     mcu_pa2 = u_mcu.pin_position("PA2")
-    wire(mcu_pa2[0], mcu_pa2[1], mcu_label_x(mcu_pa2), mcu_pa2[1])
-    sch.add_label("I_SENSE", mcu_label_x(mcu_pa2), mcu_pa2[1])
+    stub_len = 5 if mcu_pa2[0] > MCU_X else -5
+    wire(mcu_pa2[0], mcu_pa2[1], mcu_pa2[0] + stub_len, mcu_pa2[1])
+    sch.add_global_label("I_SENSE", mcu_pa2[0] + stub_len, mcu_pa2[1], shape="input")
 
     # -------------------------------------------------------------------------
     # OCP Comparator Wiring
@@ -1284,9 +1298,9 @@ def create_softstart_schematic():
     ocp_vcc = u_ocp.pin_position("V+")
     ocp_gnd = u_ocp.pin_position("V-")
 
-    # Wire I_SENSE to comparator + input
+    # Wire I_SENSE to comparator + input - use global label
     wire(ocp_plus[0] - 10, ocp_plus[1], ocp_plus[0], ocp_plus[1])
-    sch.add_label("I_SENSE", ocp_plus[0] - 10, ocp_plus[1])
+    sch.add_global_label("I_SENSE", ocp_plus[0] - 10, ocp_plus[1], shape="input")
 
     # Wire threshold divider to comparator - input
     r_ocp1_p2 = r_ocp1.pin_position("2")
@@ -1322,12 +1336,13 @@ def create_softstart_schematic():
     # OCP_TRIP label
     sch.remove_label("OCP_TRIP")
     wire(r_blank_p2[0], r_blank_p2[1], r_blank_p2[0] + 5, r_blank_p2[1])
-    sch.add_label("OCP_TRIP", r_blank_p2[0] + 5, r_blank_p2[1])
+    sch.add_global_label("OCP_TRIP", r_blank_p2[0] + 5, r_blank_p2[1], shape="output")
 
-    # Wire OCP_TRIP to MCU
+    # Wire OCP_TRIP to MCU - use global label
     mcu_pa3 = u_mcu.pin_position("PA3")
-    wire(mcu_pa3[0], mcu_pa3[1], mcu_label_x(mcu_pa3), mcu_pa3[1])
-    sch.add_label("OCP_TRIP", mcu_label_x(mcu_pa3), mcu_pa3[1])
+    stub = 5 if mcu_pa3[0] > MCU_X else -5
+    wire(mcu_pa3[0], mcu_pa3[1], mcu_pa3[0] + stub, mcu_pa3[1])
+    sch.add_global_label("OCP_TRIP", mcu_pa3[0] + stub, mcu_pa3[1], shape="input")
 
     # -------------------------------------------------------------------------
     # Gate Driver Wiring
@@ -1351,26 +1366,29 @@ def create_softstart_schematic():
     drv2_vdd = u_drv2.pin_position("V_{DD}")
     drv2_gnd = u_drv2.pin_position("GND")
 
-    # Wire driver inputs from MCU
+    # Wire driver inputs - use global labels to connect to MCU
     sch.remove_label("DRV_POS_HI")
     sch.remove_label("DRV_POS_LO")
 
     wire(drv1_in[0] - 10, drv1_in[1], drv1_in[0], drv1_in[1])
-    sch.add_label("DRV_POS_HI", drv1_in[0] - 10, drv1_in[1])
+    sch.add_global_label("DRV_POS_HI", drv1_in[0] - 10, drv1_in[1], shape="input")
 
     wire(drv2_in[0] - 10, drv2_in[1], drv2_in[0], drv2_in[1])
-    sch.add_label("DRV_POS_LO", drv2_in[0] - 10, drv2_in[1])
+    sch.add_global_label("DRV_POS_LO", drv2_in[0] - 10, drv2_in[1], shape="input")
 
     # MCU outputs for gate drivers (using multiplexed pin names)
     mcu_pa6 = u_mcu.pin_position("PA6")
     mcu_pa7 = u_mcu.pin_position("PA7")
     mcu_drv_neg = u_mcu.pin_position("PA8/PB0/PB1/PB2")  # DRV_NEG_HI and LO share one physical pin in this package
 
-    wire(mcu_pa6[0], mcu_pa6[1], mcu_label_x(mcu_pa6), mcu_pa6[1])
-    sch.add_label("DRV_POS_HI", mcu_label_x(mcu_pa6), mcu_pa6[1])
+    # Use global labels with short stubs to avoid wire crossings
+    stub = 5 if mcu_pa6[0] > MCU_X else -5
+    wire(mcu_pa6[0], mcu_pa6[1], mcu_pa6[0] + stub, mcu_pa6[1])
+    sch.add_global_label("DRV_POS_HI", mcu_pa6[0] + stub, mcu_pa6[1], shape="output")
 
-    wire(mcu_pa7[0], mcu_pa7[1], mcu_label_x(mcu_pa7), mcu_pa7[1])
-    sch.add_label("DRV_POS_LO", mcu_label_x(mcu_pa7), mcu_pa7[1])
+    stub = 5 if mcu_pa7[0] > MCU_X else -5
+    wire(mcu_pa7[0], mcu_pa7[1], mcu_pa7[0] + stub, mcu_pa7[1])
+    sch.add_global_label("DRV_POS_LO", mcu_pa7[0] + stub, mcu_pa7[1], shape="output")
 
     # Driver power (12V)
     c13_p1 = c_drv_pos.pin_position("1")
@@ -1506,22 +1524,25 @@ def create_softstart_schematic():
     sch.remove_label("DRV_NEG_HI")
     sch.remove_label("DRV_NEG_LO")
 
+    # Use global labels for driver inputs
     wire(drv3_in[0] - 10, drv3_in[1], drv3_in[0], drv3_in[1])
-    sch.add_label("DRV_NEG_HI", drv3_in[0] - 10, drv3_in[1])
+    sch.add_global_label("DRV_NEG_HI", drv3_in[0] - 10, drv3_in[1], shape="input")
 
     wire(drv4_in[0] - 10, drv4_in[1], drv4_in[0], drv4_in[1])
-    sch.add_label("DRV_NEG_LO", drv4_in[0] - 10, drv4_in[1])
+    sch.add_global_label("DRV_NEG_LO", drv4_in[0] - 10, drv4_in[1], shape="input")
 
-    # Note: For this 20-pin package, DRV_NEG uses combined pin - just add labels
+    # MCU outputs for DRV_NEG - use global labels with short stubs
     # Using PA9/PA11 for DRV_NEG_HI
     mcu_drv_neg_hi = u_mcu.pin_position("PA9/PA11")
-    wire(mcu_drv_neg_hi[0], mcu_drv_neg_hi[1], mcu_label_x(mcu_drv_neg_hi), mcu_drv_neg_hi[1])
-    sch.add_label("DRV_NEG_HI", mcu_label_x(mcu_drv_neg_hi), mcu_drv_neg_hi[1])
+    stub = 5 if mcu_drv_neg_hi[0] > MCU_X else -5
+    wire(mcu_drv_neg_hi[0], mcu_drv_neg_hi[1], mcu_drv_neg_hi[0] + stub, mcu_drv_neg_hi[1])
+    sch.add_global_label("DRV_NEG_HI", mcu_drv_neg_hi[0] + stub, mcu_drv_neg_hi[1], shape="output")
 
     # Using PA10/PA12 for DRV_NEG_LO
     mcu_drv_neg_lo = u_mcu.pin_position("PA10/PA12")
-    wire(mcu_drv_neg_lo[0], mcu_drv_neg_lo[1], mcu_label_x(mcu_drv_neg_lo), mcu_drv_neg_lo[1])
-    sch.add_label("DRV_NEG_LO", mcu_label_x(mcu_drv_neg_lo), mcu_drv_neg_lo[1])
+    stub = 5 if mcu_drv_neg_lo[0] > MCU_X else -5
+    wire(mcu_drv_neg_lo[0], mcu_drv_neg_lo[1], mcu_drv_neg_lo[0] + stub, mcu_drv_neg_lo[1])
+    sch.add_global_label("DRV_NEG_LO", mcu_drv_neg_lo[0] + stub, mcu_drv_neg_lo[1], shape="output")
 
     # Driver 3,4 power
     c14_p1 = c_drv_neg.pin_position("1")
@@ -1692,10 +1713,10 @@ def create_softstart_schematic():
     sch.add_power("power:GND", r21_p1[0], r21_p1[1] - 5)
     wire(r21_p1[0], r21_p1[1] - 5, r21_p1[0], r21_p1[1])
 
-    # PRECHG_POS control label
+    # PRECHG_POS control - use global label to avoid wire crossing
     sch.remove_label("PRECHG_POS")
     wire(q5_g[0] - 10, q5_g[1], q5_g[0], q5_g[1])
-    sch.add_label("PRECHG_POS", q5_g[0] - 10, q5_g[1])
+    sch.add_global_label("PRECHG_POS", q5_g[0] - 10, q5_g[1], shape="input")
 
     # Connect precharge to bus
     wire(r16_p1[0] - 5, r16_p1[1], r16_p1[0], r16_p1[1])
@@ -1703,10 +1724,11 @@ def create_softstart_schematic():
     wire(q5_s[0], q5_s[1], q5_s[0] + 5, q5_s[1])
     sch.add_label("SC_POS_PLUS", q5_s[0] + 5, q5_s[1])
 
-    # MCU precharge control (using combined pin name for this package)
+    # MCU precharge control - use global label with short stub
     mcu_prechg_pos = u_mcu.pin_position("PA8/PB0/PB1/PB2")
-    wire(mcu_prechg_pos[0], mcu_prechg_pos[1], mcu_label_x(mcu_prechg_pos), mcu_prechg_pos[1])
-    sch.add_label("PRECHG_POS", mcu_label_x(mcu_prechg_pos), mcu_prechg_pos[1])
+    stub = 5 if mcu_prechg_pos[0] > MCU_X else -5
+    wire(mcu_prechg_pos[0], mcu_prechg_pos[1], mcu_prechg_pos[0] + stub, mcu_prechg_pos[1])
+    sch.add_global_label("PRECHG_POS", mcu_prechg_pos[0] + stub, mcu_prechg_pos[1], shape="output")
 
     # Negative bank precharge (similar)
     r17_p1 = r_prechg_neg.pin_position("1")
@@ -1725,19 +1747,21 @@ def create_softstart_schematic():
     sch.add_power("power:GND", r22_p1[0], r22_p1[1] - 5)
     wire(r22_p1[0], r22_p1[1] - 5, r22_p1[0], r22_p1[1])
 
+    # PRECHG_NEG control - use global label to avoid wire crossing
     sch.remove_label("PRECHG_NEG")
     wire(q6_g[0] - 10, q6_g[1], q6_g[0], q6_g[1])
-    sch.add_label("PRECHG_NEG", q6_g[0] - 10, q6_g[1])
+    sch.add_global_label("PRECHG_NEG", q6_g[0] - 10, q6_g[1], shape="input")
 
     wire(r17_p1[0] - 5, r17_p1[1], r17_p1[0], r17_p1[1])
     sch.add_label("BUS_NEG", r17_p1[0] - 5, r17_p1[1])
     wire(q6_s[0], q6_s[1], q6_s[0] + 5, q6_s[1])
     sch.add_label("SC_NEG_PLUS", q6_s[0] + 5, q6_s[1])
 
-    # PRECHG_NEG using PB3/PB4/PB5/PB6 pin
+    # PRECHG_NEG MCU control - use global label with short stub
     mcu_prechg_neg = u_mcu.pin_position("PB3/PB4/PB5/PB6")
-    wire(mcu_prechg_neg[0], mcu_prechg_neg[1], mcu_label_x(mcu_prechg_neg), mcu_prechg_neg[1])
-    sch.add_label("PRECHG_NEG", mcu_label_x(mcu_prechg_neg), mcu_prechg_neg[1])
+    stub = 5 if mcu_prechg_neg[0] > MCU_X else -5
+    wire(mcu_prechg_neg[0], mcu_prechg_neg[1], mcu_prechg_neg[0] + stub, mcu_prechg_neg[1])
+    sch.add_global_label("PRECHG_NEG", mcu_prechg_neg[0] + stub, mcu_prechg_neg[1], shape="output")
 
     # -------------------------------------------------------------------------
     # LED wiring
@@ -1748,15 +1772,17 @@ def create_softstart_schematic():
     sch.add_power("power:GND", led_k[0], led_k[1] + 5)
     wire(led_k[0], led_k[1], led_k[0], led_k[1] + 5)
 
+    # LED_STATUS - use global label to avoid wire crossing
     r25_p1 = r_led.pin_position("1")
     sch.remove_label("LED_STATUS")
     wire(r25_p1[0] - 5, r25_p1[1], r25_p1[0], r25_p1[1])
-    sch.add_label("LED_STATUS", r25_p1[0] - 5, r25_p1[1])
+    sch.add_global_label("LED_STATUS", r25_p1[0] - 5, r25_p1[1], shape="input")
 
-    # LED_STATUS using PB7/PB8 pin
+    # LED_STATUS MCU control - use global label with short stub
     mcu_led = u_mcu.pin_position("PB7/PB8")
-    wire(mcu_led[0], mcu_led[1], mcu_label_x(mcu_led), mcu_led[1])
-    sch.add_label("LED_STATUS", mcu_label_x(mcu_led), mcu_led[1])
+    stub = 5 if mcu_led[0] > MCU_X else -5
+    wire(mcu_led[0], mcu_led[1], mcu_led[0] + stub, mcu_led[1])
+    sch.add_global_label("LED_STATUS", mcu_led[0] + stub, mcu_led[1], shape="output")
 
     # -------------------------------------------------------------------------
     # Supercapacitor bank wiring
@@ -1814,9 +1840,9 @@ def create_softstart_schematic():
     wire(r23_p2[0], r23_p2[1], d6_a[0], r23_p2[1])
     wire(d6_a[0], r23_p2[1], d6_a[0], d6_a[1])
 
-    # Use different X offsets to prevent vertical wire overlap that could short AC_L and AC_N
+    # Use different X offsets to prevent vertical wire overlap - use global labels
     wire(r23_p1[0] - 10, r23_p1[1], r23_p1[0], r23_p1[1])
-    sch.add_label("AC_L", r23_p1[0] - 10, r23_p1[1])
+    sch.add_global_label("AC_L", r23_p1[0] - 10, r23_p1[1], shape="passive")
     wire(d6_k[0], d6_k[1], d6_k[0] + 5, d6_k[1])
     sch.add_label("SC_POS_PLUS", d6_k[0] + 5, d6_k[1])
 
@@ -1828,9 +1854,9 @@ def create_softstart_schematic():
     wire(r24_p2[0], r24_p2[1], d7_a[0], r24_p2[1])
     wire(d7_a[0], r24_p2[1], d7_a[0], d7_a[1])
 
-    # Use same offset as AC_L - since resistors are at different X, labels will be at different X
+    # Use same offset as AC_L - use global labels
     wire(r24_p1[0] - 10, r24_p1[1], r24_p1[0], r24_p1[1])
-    sch.add_label("AC_N", r24_p1[0] - 10, r24_p1[1])
+    sch.add_global_label("AC_N", r24_p1[0] - 10, r24_p1[1], shape="passive")
     wire(d7_k[0], d7_k[1], d7_k[0] + 5, d7_k[1])
     sch.add_label("SC_NEG_PLUS", d7_k[0] + 5, d7_k[1])
 
