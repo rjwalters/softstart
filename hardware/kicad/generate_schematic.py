@@ -253,10 +253,12 @@ def create_softstart_schematic():
         rotation=90,
         footprint="Resistor_SMD:R_0805_2012Metric"
     )
-    # Place pull-up resistor ABOVE the H11AA1 to route vertically down to output
+    # Place pull-up resistor directly above the H11AA1 output for pure vertical routing
+    # H11AA1 output (pin 6) is at approximately X = SENSE_X - 42.52 (157.48mm for symbol at 150mm)
+    # Place resistor at same X to avoid any horizontal wire crossings
     r_zc_pull = sch.add_symbol(
         lib_id="Device:R",
-        x=SENSE_X - 40, y=SENSE_Y - 30,  # Above and left of H11AA1
+        x=SENSE_X - 43, y=SENSE_Y - 35,  # Directly above H11AA1 output pin
         ref="R3", value="10k",
         rotation=0,
         footprint="Resistor_SMD:R_0805_2012Metric"
@@ -782,7 +784,7 @@ def create_softstart_schematic():
 
     j_swd = sch.add_symbol(
         lib_id="Connector:Conn_01x05_Pin",
-        x=MCU_X + 60, y=MCU_Y + 10,  # Moved down to avoid 3.3V GND rail crossing
+        x=MCU_X + 80, y=MCU_Y - 30,  # Moved up and right to avoid SC_POS_Y conflicts
         ref="J3", value="SWD",
         rotation=0,
         footprint="Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical"
@@ -1054,44 +1056,23 @@ def create_softstart_schematic():
     sch.add_power("power:GND", swd_pwr_x - 5, j3_p4[1])
     wire(swd_pwr_x - 5, j3_p4[1], swd_pwr_x, j3_p4[1])
 
-    # Direct wiring from MCU to SWD connector (route on right side to avoid AC)
-    # MCU pin positions
+    # Connect MCU debug signals to SWD connector using global labels
+    # This avoids physical wire crossings with the charging circuit at Y=SC_POS_Y
     mcu_swdio = u_mcu.pin_position("PA13")
     mcu_swclk = u_mcu.pin_position("PA14/PA15")
     mcu_nrst = u_mcu.pin_position("PF2")
 
-    # For pins on left side of MCU, route right: go horizontal right past MCU, then route to SWD
-    # For pins on right side of MCU, route directly to SWD
-    route_x = MCU_X + 30  # X position to the right of MCU for routing
+    # SWDIO: Use global labels directly on pins (no stub wires to avoid crossings)
+    sch.add_global_label("SWDIO", mcu_swdio[0], mcu_swdio[1], shape="bidirectional")
+    sch.add_global_label("SWDIO", j3_p2[0], j3_p2[1], shape="bidirectional")
 
-    # SWDIO: MCU -> route right -> SWD pin 2
-    if mcu_swdio[0] < MCU_X:
-        # Left side pin: go right past MCU first
-        wire(mcu_swdio[0], mcu_swdio[1], route_x, mcu_swdio[1])
-        wire(route_x, mcu_swdio[1], route_x, j3_p2[1])
-        wire(route_x, j3_p2[1], j3_p2[0], j3_p2[1])
-    else:
-        # Right side pin: route directly
-        wire(mcu_swdio[0], mcu_swdio[1], j3_p2[0], mcu_swdio[1])
-        wire(j3_p2[0], mcu_swdio[1], j3_p2[0], j3_p2[1])
+    # SWCLK: Use global labels directly on pins
+    sch.add_global_label("SWCLK", mcu_swclk[0], mcu_swclk[1], shape="output")
+    sch.add_global_label("SWCLK", j3_p3[0], j3_p3[1], shape="input")
 
-    # SWCLK: MCU -> route right -> SWD pin 3
-    if mcu_swclk[0] < MCU_X:
-        wire(mcu_swclk[0], mcu_swclk[1], route_x + 5, mcu_swclk[1])
-        wire(route_x + 5, mcu_swclk[1], route_x + 5, j3_p3[1])
-        wire(route_x + 5, j3_p3[1], j3_p3[0], j3_p3[1])
-    else:
-        wire(mcu_swclk[0], mcu_swclk[1], j3_p3[0], mcu_swclk[1])
-        wire(j3_p3[0], mcu_swclk[1], j3_p3[0], j3_p3[1])
-
-    # NRST: MCU -> route right -> SWD pin 5
-    if mcu_nrst[0] < MCU_X:
-        wire(mcu_nrst[0], mcu_nrst[1], route_x + 10, mcu_nrst[1])
-        wire(route_x + 10, mcu_nrst[1], route_x + 10, j3_p5[1])
-        wire(route_x + 10, j3_p5[1], j3_p5[0], j3_p5[1])
-    else:
-        wire(mcu_nrst[0], mcu_nrst[1], j3_p5[0], mcu_nrst[1])
-        wire(j3_p5[0], mcu_nrst[1], j3_p5[0], j3_p5[1])
+    # NRST: Use global labels directly on pins
+    sch.add_global_label("NRST", mcu_nrst[0], mcu_nrst[1], shape="bidirectional")
+    sch.add_global_label("NRST", j3_p5[0], j3_p5[1], shape="bidirectional")
 
     # -------------------------------------------------------------------------
     # Zero-Crossing Detection Wiring
@@ -1126,19 +1107,17 @@ def create_softstart_schematic():
     sch.add_global_label("AC_N", r2_p2[0] + 5, r2_p2[1], shape="input")
 
     # Wire pull-up resistor to ZC output
-    # Pull-up R3 is at (160, 110) - above and left of H11AA1 output at (157.48, 137.16)
-    # Route: r3_p2 -> down to a safe Y level -> right to zc_out X -> down to zc_out
-    # Safe route: avoid Y=132 (anode) and Y=148 (cathode)
-    wire(r3_p2[0], r3_p2[1], r3_p2[0], r3_p2[1] + 5)  # short vertical stub from pull-up
-    wire(r3_p2[0], r3_p2[1] + 5, zc_out[0], r3_p2[1] + 5)  # horizontal at safe Y level (~115)
-    wire(zc_out[0], r3_p2[1] + 5, zc_out[0], zc_out[1])  # vertical down to zc_out
+    # Pull-up R3 is directly above H11AA1 output - minimal horizontal routing
+    # Route: r3_p2 down to zc_out Y level, short horizontal to zc_out X, then connect
+    wire(r3_p2[0], r3_p2[1], r3_p2[0], zc_out[1])  # vertical down to output Y level
+    wire(r3_p2[0], zc_out[1], zc_out[0], zc_out[1])  # short horizontal to output pin
     sch.add_power("power:+3.3V", r3_p1[0], r3_p1[1] - 5)
     wire(r3_p1[0], r3_p1[1] - 5, r3_p1[0], r3_p1[1])
 
-    # ZC output - add global label at the junction (same wire as pull-up connection)
-    # Place label where the horizontal wire meets the vertical segment
+    # ZC output - add global label on the vertical wire above the output
+    # Place it on the vertical segment to avoid any horizontal wire crossings
     sch.remove_label("ZC_OUT")
-    sch.add_global_label("ZC_OUT", zc_out[0], r3_p2[1] + 5, shape="output")
+    sch.add_global_label("ZC_OUT", r3_p2[0], r3_p2[1] + 10, shape="output")
 
     # ZC power - VCC offset to the right to avoid crossing output wire
     sch.add_power("power:+3.3V", zc_vcc[0] + 10, zc_vcc[1] - 5)
