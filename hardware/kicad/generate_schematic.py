@@ -781,7 +781,7 @@ def create_softstart_schematic():
 
     j_swd = sch.add_symbol(
         lib_id="Connector:Conn_01x05_Pin",
-        x=MCU_X + 60, y=MCU_Y - 15,
+        x=MCU_X + 60, y=MCU_Y + 10,  # Moved down to avoid 3.3V GND rail crossing
         ref="J3", value="SWD",
         rotation=0,
         footprint="Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical"
@@ -991,30 +991,27 @@ def create_softstart_schematic():
     c3_p1 = c_mcu3.pin_position("1")
     c3_p2 = c_mcu3.pin_position("2")
 
-    # Connect bypass caps in parallel to power rails
-    # Place both vertical buses to the LEFT of caps to avoid crossing MCU signal wires
-    byp_vdd_x = c1_p1[0] - 10
-    byp_gnd_x = c1_p2[0] - 10  # Changed to left side to avoid crossing SWDIO/SWCLK wires
+    # Connect bypass caps directly to power symbols (no shared buses to avoid crossing MCU signals)
+    # Each cap gets its own +3.3V symbol above and GND symbol below
+    # This avoids any vertical bus wires that could cross SWDIO/SWCLK traces
 
-    # VDD side: horizontal wires from each cap to bus, vertical bus segments between caps
-    wire(byp_vdd_x, c1_p1[1], c1_p1[0], c1_p1[1])  # C1 to bus
-    wire(byp_vdd_x, c2_p1[1], c2_p1[0], c2_p1[1])  # C2 to bus
-    wire(byp_vdd_x, c3_p1[1], c3_p1[0], c3_p1[1])  # C3 to bus
-    # Vertical bus in segments to ensure proper connections at T-junctions
-    wire(byp_vdd_x, c1_p1[1], byp_vdd_x, c2_p1[1])  # C1 to C2
-    wire(byp_vdd_x, c2_p1[1], byp_vdd_x, c3_p1[1])  # C2 to C3
-    sch.add_power("power:+3.3V", byp_vdd_x, c1_p1[1] - 5)
-    wire(byp_vdd_x, c1_p1[1] - 5, byp_vdd_x, c1_p1[1])
+    # C1 power connections - power symbols directly above/below the cap
+    sch.add_power("power:+3.3V", c1_p1[0], c1_p1[1] - 5)
+    wire(c1_p1[0], c1_p1[1] - 5, c1_p1[0], c1_p1[1])
+    sch.add_power("power:GND", c1_p2[0], c1_p2[1] + 5)
+    wire(c1_p2[0], c1_p2[1], c1_p2[0], c1_p2[1] + 5)
 
-    # GND side: horizontal wires from each cap to bus, vertical bus segments between caps
-    wire(byp_gnd_x, c1_p2[1], c1_p2[0], c1_p2[1])  # C1 to bus
-    wire(byp_gnd_x, c2_p2[1], c2_p2[0], c2_p2[1])  # C2 to bus
-    wire(byp_gnd_x, c3_p2[1], c3_p2[0], c3_p2[1])  # C3 to bus
-    # Vertical bus in segments
-    wire(byp_gnd_x, c1_p2[1], byp_gnd_x, c2_p2[1])  # C1 to C2
-    wire(byp_gnd_x, c2_p2[1], byp_gnd_x, c3_p2[1])  # C2 to C3
-    sch.add_power("power:GND", byp_gnd_x, c3_p2[1] + 5)
-    wire(byp_gnd_x, c3_p2[1], byp_gnd_x, c3_p2[1] + 5)
+    # C2 power connections
+    sch.add_power("power:+3.3V", c2_p1[0], c2_p1[1] - 5)
+    wire(c2_p1[0], c2_p1[1] - 5, c2_p1[0], c2_p1[1])
+    sch.add_power("power:GND", c2_p2[0], c2_p2[1] + 5)
+    wire(c2_p2[0], c2_p2[1], c2_p2[0], c2_p2[1] + 5)
+
+    # C3 power connections
+    sch.add_power("power:+3.3V", c3_p1[0], c3_p1[1] - 5)
+    wire(c3_p1[0], c3_p1[1] - 5, c3_p1[0], c3_p1[1])
+    sch.add_power("power:GND", c3_p2[0], c3_p2[1] + 5)
+    wire(c3_p2[0], c3_p2[1], c3_p2[0], c3_p2[1] + 5)
 
     # -------------------------------------------------------------------------
     # MCU Signal Labels - wire from MCU pins to label positions
@@ -1026,49 +1023,74 @@ def create_softstart_schematic():
     mcu_swclk = u_mcu.pin_position("PA14/PA15")
     mcu_nrst = u_mcu.pin_position("PF2")  # PF2 can be NRST
 
-    # Remove old labels and place at proper positions with wires
+    # Remove old labels - we'll use direct wiring instead
     sch.remove_label("SWDIO")
     sch.remove_label("SWCLK")
     sch.remove_label("NRST")
 
-    # Use different label positions for left/right side MCU pins to avoid wire overlaps
+    # Label position for other MCU signals (not debug signals)
     label_x_right = MCU_X + 40  # For pins on right side of MCU
-    label_x_left = MCU_X - 40   # For pins on left side of MCU
 
-    # SWDIO, SWCLK, NRST are on left side of MCU (pins with x < MCU_X)
-    wire(mcu_swdio[0], mcu_swdio[1], label_x_left, mcu_swdio[1])
-    sch.add_label("SWDIO", label_x_left, mcu_swdio[1])
+    # Route MCU debug signals (SWDIO, SWCLK, NRST) directly to SWD connector
+    # Using direct wires (not labels) to avoid crossing issues with AC section
+    # The SWD connector is on the right side, so we route right regardless of MCU pin side
 
-    wire(mcu_swclk[0], mcu_swclk[1], label_x_left, mcu_swclk[1])
-    sch.add_label("SWCLK", label_x_left, mcu_swclk[1])
-
-    wire(mcu_nrst[0], mcu_nrst[1], label_x_left, mcu_nrst[1])
-    sch.add_label("NRST", label_x_left, mcu_nrst[1])
-
-    # SWD connector wiring
+    # SWD connector wiring - wire directly from MCU to SWD connector
+    # Route on the right side of MCU to avoid crossing AC section wires
     j3_p1 = j_swd.pin_position("1")  # VCC
     j3_p2 = j_swd.pin_position("2")  # SWDIO
     j3_p3 = j_swd.pin_position("3")  # SWCLK
     j3_p4 = j_swd.pin_position("4")  # GND
     j3_p5 = j_swd.pin_position("5")  # NRST
 
-    swd_label_x = j3_p1[0] - 15
-    wire(j3_p1[0], j3_p1[1], swd_label_x, j3_p1[1])
-    sch.add_power("power:+3.3V", swd_label_x - 5, j3_p1[1])
-    wire(swd_label_x - 5, j3_p1[1], swd_label_x, j3_p1[1])
+    # VCC and GND connect to power symbols
+    swd_pwr_x = j3_p1[0] - 10
+    wire(j3_p1[0], j3_p1[1], swd_pwr_x, j3_p1[1])
+    sch.add_power("power:+3.3V", swd_pwr_x - 5, j3_p1[1])
+    wire(swd_pwr_x - 5, j3_p1[1], swd_pwr_x, j3_p1[1])
 
-    wire(j3_p2[0], j3_p2[1], swd_label_x, j3_p2[1])
-    sch.add_label("SWDIO", swd_label_x, j3_p2[1])
+    wire(j3_p4[0], j3_p4[1], swd_pwr_x, j3_p4[1])
+    sch.add_power("power:GND", swd_pwr_x - 5, j3_p4[1])
+    wire(swd_pwr_x - 5, j3_p4[1], swd_pwr_x, j3_p4[1])
 
-    wire(j3_p3[0], j3_p3[1], swd_label_x, j3_p3[1])
-    sch.add_label("SWCLK", swd_label_x, j3_p3[1])
+    # Direct wiring from MCU to SWD connector (route on right side to avoid AC)
+    # MCU pin positions
+    mcu_swdio = u_mcu.pin_position("PA13")
+    mcu_swclk = u_mcu.pin_position("PA14/PA15")
+    mcu_nrst = u_mcu.pin_position("PF2")
 
-    wire(j3_p4[0], j3_p4[1], swd_label_x, j3_p4[1])
-    sch.add_power("power:GND", swd_label_x - 5, j3_p4[1])
-    wire(swd_label_x - 5, j3_p4[1], swd_label_x, j3_p4[1])
+    # For pins on left side of MCU, route right: go horizontal right past MCU, then route to SWD
+    # For pins on right side of MCU, route directly to SWD
+    route_x = MCU_X + 30  # X position to the right of MCU for routing
 
-    wire(j3_p5[0], j3_p5[1], swd_label_x, j3_p5[1])
-    sch.add_label("NRST", swd_label_x, j3_p5[1])
+    # SWDIO: MCU -> route right -> SWD pin 2
+    if mcu_swdio[0] < MCU_X:
+        # Left side pin: go right past MCU first
+        wire(mcu_swdio[0], mcu_swdio[1], route_x, mcu_swdio[1])
+        wire(route_x, mcu_swdio[1], route_x, j3_p2[1])
+        wire(route_x, j3_p2[1], j3_p2[0], j3_p2[1])
+    else:
+        # Right side pin: route directly
+        wire(mcu_swdio[0], mcu_swdio[1], j3_p2[0], mcu_swdio[1])
+        wire(j3_p2[0], mcu_swdio[1], j3_p2[0], j3_p2[1])
+
+    # SWCLK: MCU -> route right -> SWD pin 3
+    if mcu_swclk[0] < MCU_X:
+        wire(mcu_swclk[0], mcu_swclk[1], route_x + 5, mcu_swclk[1])
+        wire(route_x + 5, mcu_swclk[1], route_x + 5, j3_p3[1])
+        wire(route_x + 5, j3_p3[1], j3_p3[0], j3_p3[1])
+    else:
+        wire(mcu_swclk[0], mcu_swclk[1], j3_p3[0], mcu_swclk[1])
+        wire(j3_p3[0], mcu_swclk[1], j3_p3[0], j3_p3[1])
+
+    # NRST: MCU -> route right -> SWD pin 5
+    if mcu_nrst[0] < MCU_X:
+        wire(mcu_nrst[0], mcu_nrst[1], route_x + 10, mcu_nrst[1])
+        wire(route_x + 10, mcu_nrst[1], route_x + 10, j3_p5[1])
+        wire(route_x + 10, j3_p5[1], j3_p5[0], j3_p5[1])
+    else:
+        wire(mcu_nrst[0], mcu_nrst[1], j3_p5[0], mcu_nrst[1])
+        wire(j3_p5[0], mcu_nrst[1], j3_p5[0], j3_p5[1])
 
     # -------------------------------------------------------------------------
     # Zero-Crossing Detection Wiring
@@ -1176,10 +1198,10 @@ def create_softstart_schematic():
     sch.add_power("power:GND", vsc_p2_p2[0], vdiv_gnd_y + 5)
     wire(vsc_p2_p2[0], vdiv_gnd_y, vsc_p2_p2[0], vdiv_gnd_y + 5)
 
-    # Wire V_BUS to MCU ADC - use pin position to determine label side
+    # Wire MCU signals to labels - always route right to avoid AC section crossings
     def mcu_label_x(pin_pos):
-        """Return appropriate label X based on which side of MCU the pin is on"""
-        return label_x_left if pin_pos[0] < MCU_X else label_x_right
+        """Return label X - always use right side to avoid wire crossings"""
+        return label_x_right  # Always route right to avoid AC section wires
 
     mcu_pa1 = u_mcu.pin_position("PA1")
     wire(mcu_pa1[0], mcu_pa1[1], mcu_label_x(mcu_pa1), mcu_pa1[1])
