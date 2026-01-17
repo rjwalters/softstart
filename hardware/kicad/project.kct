@@ -7,13 +7,14 @@ kct_version: "1.0"
 
 project:
   name: "Generator Soft-Start"
-  revision: "A"
+  revision: "B"
   created: 2025-01-15
+  updated: 2025-01-16
   author: "rjwalters"
   description: |
     Supercapacitor-based power assist for starting window AC units on small
-    portable generators. Injects supplemental current during motor startup
-    to prevent generator overload.
+    portable generators. Connects supercap banks in parallel with AC line
+    during voltage sags to supplement current during motor startup.
   artifacts:
     schematic: "softstart.kicad_sch"
     pcb: "softstart.kicad_pcb"
@@ -23,7 +24,16 @@ intent:
     Enable a Honda EU1000i (1000W) generator to start an 8000 BTU window
     air conditioner by supplementing current during the 300-500ms motor
     startup surge. Uses supercapacitor banks charged from the AC line,
-    with STM32 MCU for PWM-controlled discharge synchronized to AC phase.
+    with STM32 MCU implementing droop-triggered support with proper
+    isolation switching (back-to-back FETs) and precharge control.
+
+  control_philosophy: |
+    NOT continuous PWM injection. Instead:
+    - Monitor AC bus voltage continuously
+    - Detect voltage droop (Vbus < threshold OR dV/dt too negative)
+    - Connect caps only when support is needed
+    - Disconnect when bus recovers (with hysteresis)
+    - State machine: ARMED → PRECHARGE → SUPPORT → RECOVER
 
   use_cases:
     - Running window AC on camping/RV trips with small generator
@@ -66,7 +76,10 @@ intent:
     - "Supercaps hand-soldered (not JLCPCB assembly)"
     - "2-layer PCB for cost"
     - "High-current traces for discharge path"
-    - "Charge only when input voltage in safe range"
+    - "Back-to-back FETs for proper isolation (no body diode sneak paths)"
+    - "Gate drivers with UVLO (never half-on)"
+    - "Precharge before main FET connection"
+    - "Hardware overcurrent protection (fast comparator)"
 
 requirements:
   electrical:
@@ -89,24 +102,80 @@ requirements:
         part: "Tecate TPLH-2R7/12WR10X30"
         capacitance: "12F"
         voltage: "2.7V"
-        esr: "36mΩ"
+        esr: "36mR"
       bank_voltage: "81V"
       bank_capacitance: "0.4F"
-      bank_esr: "1.08Ω"
+      bank_esr: "1.08R"
 
-    boost_performance:
-      ac_coverage: "32%"
-      max_discharge_current: "25A"
-      effective_rms_current: "14A"
-      energy_200ms: "110J"
-      energy_500ms: "210J"
+    switching:
+      topology: "Back-to-back N-MOSFETs per bank"
+      description: |
+        Two N-FETs source-to-source (common-source node) so body diodes oppose.
+        Provides true bidirectional off-state with no sneak current paths.
+      fets_per_bank: 2
+      total_discharge_fets: 4
+      gate_drive: "Dedicated gate driver IC with UVLO"
+      protection:
+        gate_bleeders: "10k gate-to-source resistors (prevent floating gates)"
+        vgs_clamp: "18V TVS gate-to-source (protect against line transients)"
+        failsafe_off: "Hardware pull-down on gates when MCU NRST low"
 
-    charging:
-      method: "resistor-limited from AC"
-      current: "0.5-1A"
-      time_to_full: "~60s"
-      enable_voltage_min: "100VAC peak"
-      enable_voltage_max: "140VAC peak"
+    gate_drivers:
+      requirements:
+        - "UVLO: outputs go low if supply dips below threshold"
+        - "High peak gate current (4A+ for fast turn-off)"
+        - "Strong Miller immunity / dV/dt rating (50V/ns+)"
+      layout_note: "Use Kelvin source routing to keep driver reference clean"
+
+    precharge:
+      description: |
+        Precharge resistor + small FET before main FETs.
+        MCU monitors deltaV; only closes main FETs when deltaV < threshold.
+      resistor: "100R 5W"
+      delta_v_ok: "5V (close main FETs when deltaV below this)"
+      t_precharge_max: "20ms (timeout → abort + fault, never force close)"
+      timeout_action: "FAULT state (do not force-close main FETs)"
+
+    sensing:
+      bus_voltage:
+        description: "AC bus voltage - envelope detection for droop, fast path for transients"
+        sample_rate: "20kHz ADC for raw samples"
+        envelope: "Windowed RMS over 1-2 cycles (~16-33ms) for steady-state"
+        fast_trigger: "Peak detect or dV/dt for sudden motor hits"
+        channels: 1
+      bank_voltage:
+        description: "Each supercap bank voltage for precharge deltaV and energy management"
+        channels: 2
+      current:
+        description: "Discharge path current - firmware limit + hardware trip"
+        method: "Shunt + amplifier + fast comparator"
+        i_max_fw: "25A (firmware stays below this)"
+        i_trip: "30A (hardware comparator forces immediate off)"
+        blanking_time: "500ns (ignore switching spikes, done in analog)"
+        channels: 1
+
+    trigger:
+      # Use envelope, not raw sine - don't chase 60Hz minima
+      v_low: "100Vpk envelope (trigger support when below)"
+      v_high: "140Vpk envelope (recovery threshold, hysteresis)"
+      dv_dt_trigger: "-500V/ms (rapid droop detection, fast path)"
+      debounce: "3 samples at 20kHz (150us) before triggering"
+      t_min_on: "10ms (prevent chatter on ringing)"
+      t_min_off: "100ms (cooldown/recover before re-arm)"
+
+    line_sync:
+      description: "Phase tracking for AC injection timing"
+      method: "Zero-crossing detection via H11AA1 optocoupler"
+      pll: "Software PLL tracking 60Hz phase"
+      lost_sync_action: "Force all FETs OFF within 8ms (half-cycle)"
+      lost_sync_threshold: "2 missed zero-crossings"
+
+    energy_management:
+      v_cap_min: "60V (minimum useful support voltage, stop discharge)"
+      v_cap_max: "85V (stop charging, protect cells)"
+      t_support_max: "500ms (maximum continuous support duration)"
+      t_recover_min: "2s (minimum time to recharge before next support)"
+      charge_current: "0.5A nominal (resistor-limited from AC)"
 
     mcu:
       part: "STM32G031F6P6"
@@ -124,70 +193,174 @@ requirements:
     target_fab: jlcpcb
     layers:
       count: 2
-      copper_weight: "2oz"
+      copper_weight: 2
     min_trace: "0.2mm"
     min_space: "0.2mm"
     min_via: "0.3mm drill"
-    assembly: "none"  # Hand-solder supercaps
+    assembly: "none"
 
   compliance:
     safety_notes:
       - "Device operates at mains voltage - proper isolation required"
       - "Supercaps store significant energy - discharge before servicing"
       - "For experimental/educational use only"
+      - "Back-to-back FETs prevent uncontrolled conduction"
+      - "Gate driver UVLO prevents half-on dangerous states"
 
 suggestions:
   components:
     supercapacitor:
       selected: "Tecate TPLH-2R7/12WR10X30"
-      rationale: "12F 2.7V at $0.91/ea - best cost/performance for this application"
+      rationale: "12F 2.7V at $0.91/ea - best cost/performance"
       alternatives: ["Maxwell 100F 2.7V ($6)", "Generic AliExpress"]
 
     mcu:
       selected: "STM32G031F6P6"
-      rationale: "Low cost ($1.50), adequate peripherals, TSSOP20 hand-solderable"
+      rationale: "Low cost ($1.50), fast ADC, adequate peripherals, TSSOP20"
       alternatives: ["STM32G031K6T6 (LQFP32)", "ATtiny1614"]
 
     discharge_mosfet:
       selected: "IRFB4110"
-      rationale: "100V 180A, low Rds(on) 3.7mΩ, TO-220 with heatsink"
+      rationale: "100V 180A, low Rds(on) 3.7mR, TO-220 for heatsinking"
+      quantity: 4
+      note: "Back-to-back pairs (2 per bank)"
       alternatives: ["IPP040N06N", "IRLB8721"]
 
-    current_sense:
-      selected: "0.005Ω shunt + INA180"
-      rationale: "Low-side sensing, 50V/V gain, 0-40A range"
-      alternatives: ["ACS712 hall sensor", "high-side sensing"]
+    gate_driver:
+      selected: "UCC27211"
+      rationale: |
+        Half-bridge driver, 4A peak drive, UVLO at 7.4V, fast 17ns rise/fall.
+        Can drive both high-side and low-side of back-to-back pair.
+        $1.20 each, SOIC-8.
+      quantity: 2
+      alternatives: ["IR2110", "MCP14700", "TC4427"]
 
-    zero_crossing:
-      selected: "H11AA1 optocoupler"
-      rationale: "AC input optocoupler, provides isolation for ZC detect"
-      alternatives: ["Resistive divider + comparator"]
+    precharge_mosfet:
+      selected: "AO3400"
+      rationale: "SOT-23 N-FET, 30V 5A, for precharge path switching"
+      quantity: 2
+      alternatives: ["2N7002", "BSS138"]
+
+    current_sense:
+      selected: "INA180A3 + 5mR shunt"
+      rationale: "100V/V gain version, fast 2us response, SOT-23-5"
+      alternatives: ["ACS712 hall sensor"]
+
+    overcurrent_comparator:
+      selected: "LM393"
+      rationale: "Fast comparator for hardware overcurrent trip, cheap, DIP-8/SOIC-8"
+      alternatives: ["LM311", "TLV7031"]
+
+    bus_voltage_sense:
+      selected: "Resistive divider + op-amp buffer"
+      rationale: "Simple, fast, isolated by input resistor value"
+      divider_ratio: "100:1 (1M + 10k)"
 
   layout:
     - "Supercaps arranged in 2 rows of 15 per bank (30 per side)"
-    - "High-current discharge path: wide traces + copper pour"
-    - "MOSFETs near supercap banks with heatsink clearance"
+    - "Back-to-back FET pairs near each bank"
+    - "Gate drivers between MCU and FET pairs"
+    - "Precharge circuit adjacent to main FET pairs"
+    - "Current shunt in common discharge path"
     - "MCU section isolated from high-current paths"
     - "AC terminals on board edge"
     - "Star ground topology - separate power and signal grounds"
-    - "Current shunt close to MOSFET source"
-    - "Test points for V_ac, V_supercap, I_load"
+    - "Test points: V_bus, V_cap_pos, V_cap_neg, I_discharge"
 
   pcb_stackup:
     layer1: "Signal + power polygons (2oz)"
     layer2: "Ground plane + power polygons (2oz)"
 
+  state_machine:
+    states:
+      - name: "INHIBIT"
+        description: "Safe state on power-up, brownout, MCU reset, or lost line sync"
+        behavior: "All FETs OFF, gates held low by hardware failsafe"
+        exit_conditions:
+          - "MCU initialized AND line sync acquired AND no faults"
+        transitions: ["IDLE"]
+
+      - name: "IDLE"
+        description: "System ready, caps discharged or unknown state"
+        transitions: ["CHARGING"]
+
+      - name: "CHARGING"
+        description: "Caps charging from AC via resistor-limited path"
+        monitor: "Vcap approaching Vcap_max"
+        transitions: ["ARMED", "FAULT", "INHIBIT"]
+
+      - name: "ARMED"
+        description: "Caps at target voltage, main FETs OFF, monitoring bus envelope"
+        entry_conditions:
+          - "Vcap > Vcap_min"
+          - "Line sync valid"
+        monitor: "Bus voltage envelope for droop"
+        transitions: ["PRECHARGE", "CHARGING", "INHIBIT"]
+
+      - name: "PRECHARGE"
+        description: "deltaV > threshold, precharge FET ON, waiting for deltaV < OK"
+        duration_max: "T_PRECHARGE_MAX (20ms)"
+        timeout_action: "FAULT (never force-close)"
+        transitions: ["SUPPORT", "FAULT"]
+
+      - name: "SUPPORT"
+        description: "Main FETs ON, bank supporting bus"
+        duration_max: "T_SUPPORT_MAX (500ms)"
+        exit_conditions:
+          - "Vbus_envelope > V_HIGH AND T_MIN_ON elapsed → RECOVER"
+          - "I_discharge > I_TRIP → FAULT (hardware forces off)"
+          - "Vcap < V_CAP_MIN → RECOVER (energy depleted)"
+          - "T_SUPPORT_MAX elapsed → RECOVER"
+        transitions: ["RECOVER", "FAULT"]
+
+      - name: "RECOVER"
+        description: "Support complete, FETs OFF, recharge caps, cooldown"
+        duration_min: "T_MIN_OFF (100ms before re-arm)"
+        duration_recharge: "T_RECOVER_MIN (2s for full recharge)"
+        transitions: ["ARMED", "CHARGING", "INHIBIT"]
+
+      - name: "FAULT"
+        description: "Error condition - overcurrent, precharge timeout, driver UVLO"
+        behavior: "All FETs OFF, LED fast-flash, log fault code"
+        latch: "Latched until manual reset OR auto-retry after T_FAULT_RETRY"
+        t_fault_retry: "10s (optional, can be disabled)"
+        transitions: ["INHIBIT"]
+
+    interlocks:
+      - "INHIBIT on any: MCU reset, brownout, lost line sync (2 missed ZC)"
+      - "Never allow pos and neg banks to create unintended conduction path"
+      - "Explicit deadtime (10us) between turning one FET off and another on"
+      - "Require bank_ready (Vcap_min < Vcap < Vcap_max) before ARMED"
+      - "Hardware comparator forces FETs off independent of MCU (I_TRIP)"
+      - "Gate failsafe pulls gates low when NRST asserted"
+
+    parameters:
+      V_LOW: "100Vpk (trigger support)"
+      V_HIGH: "140Vpk (recovery threshold)"
+      V_CAP_MIN: "60V (stop discharge)"
+      V_CAP_MAX: "85V (stop charge)"
+      DELTA_V_OK: "5V (precharge complete)"
+      I_MAX_FW: "25A (firmware limit)"
+      I_TRIP: "30A (hardware trip)"
+      T_MIN_ON: "10ms"
+      T_MIN_OFF: "100ms"
+      T_PRECHARGE_MAX: "20ms"
+      T_SUPPORT_MAX: "500ms"
+      T_RECOVER_MIN: "2s"
+      T_FAULT_RETRY: "10s"
+      DEADTIME: "10us"
+
 decisions:
   - date: 2025-01-15
     phase: concept
     topic: "Supercap vs Hybrid Design"
-    choice: "Supercap-only (60× 12F cells)"
+    choice: "Supercap-only (60x 12F cells)"
     rationale: |
       Hybrid design (supercaps + electrolytics) delivers more energy but
-      costs 2-3× more and requires complex stacking/switching. Supercap-only
+      costs 2-3x more and requires complex stacking/switching. Supercap-only
       at 81V provides same AC coverage (32%) and sufficient energy for
       8000 BTU startup at half the cost.
-    alternatives: ["16×100F + 56×4700µF hybrid ($224)", "LiPo battery tiers"]
+    alternatives: ["16x100F + 56x4700uF hybrid ($224)", "LiPo battery tiers"]
 
   - date: 2025-01-15
     phase: concept
@@ -195,29 +368,53 @@ decisions:
     choice: "Tecate 12F 2.7V @ $0.91"
     rationale: |
       DigiKey availability at $0.91/ea (qty 100). 60 cells = $54.60.
-      Smaller cells allow higher voltage (81V vs 21.6V with 100F cells)
-      while keeping costs low.
-    alternatives: ["100F 2.7V @ $6 (too expensive)", "AliExpress generic (quality concerns)"]
+      Smaller cells allow higher voltage (81V vs 21.6V with 100F cells).
+    alternatives: ["100F 2.7V @ $6 (too expensive)", "AliExpress generic"]
 
-  - date: 2025-01-15
+  - date: 2025-01-16
     phase: concept
-    topic: "Control Approach"
-    choice: "STM32 MCU with PWM"
+    topic: "Switching Topology"
+    choice: "Back-to-back N-MOSFETs with gate drivers"
     rationale: |
-      MCU adds $1.50 but enables: sinusoidal current shaping, precise
-      protection limits, motor start detection, status feedback. Pure
-      analog would be simpler but less capable.
-    alternatives: ["Analog comparator control", "ATtiny microcontroller"]
+      Single MOSFET has body diode that creates sneak current paths.
+      Back-to-back FETs (sources tied) provide true bidirectional off-state.
+      Gate drivers ensure proper drive strength, UVLO prevents half-on states.
+      Adds ~$10 to BOM but critical for safe operation.
+    alternatives: ["Single FET (body diode issues)", "IGBT (slower, more expensive)"]
 
-  - date: 2025-01-15
+  - date: 2025-01-16
     phase: concept
-    topic: "Charging Strategy"
-    choice: "Resistor-limited, MCU-enabled"
+    topic: "Control Strategy"
+    choice: "Droop-triggered state machine (not continuous PWM)"
     rationale: |
-      Simple resistor limits inrush, MCU enables charging only when
-      input voltage is in safe range (100-140V peak). Protects against
-      overvoltage from generator surges.
-    alternatives: ["Always-on charging", "Current-limited supply"]
+      Original PWM approach would cycle caps at 60Hz, wasting energy and
+      creating zero-crossing timing issues. Droop detection connects caps
+      only when needed, dramatically reducing switching stress and
+      simplifying control. State machine with interlocks prevents
+      dangerous switching sequences.
+    alternatives: ["Phase-locked PWM injection", "Analog comparator control"]
+
+  - date: 2025-01-16
+    phase: concept
+    topic: "Precharge Circuit"
+    choice: "100R resistor + small FET before main FETs"
+    rationale: |
+      Connecting caps directly to bus causes brutal inrush current.
+      Precharge through resistor until deltaV < 5V, then close main FETs.
+      Simple, reliable, protects main FETs from inrush stress.
+    alternatives: ["Gate slew rate limiting (can overheat FET)", "No precharge (dangerous)"]
+
+  - date: 2025-01-16
+    phase: concept
+    topic: "Topology: AC Support vs DC Bus"
+    choice: "AC support with dual banks"
+    rationale: |
+      DC bus approach would require rectifier + inverter, adding $50-100
+      and significant complexity. AC support with proper switching
+      (back-to-back FETs, precharge, droop trigger) is simpler and
+      adequate for motor starting application. 60Hz is slow enough
+      for MCU-based control.
+    alternatives: ["DC bus with VFD-style inverter"]
 
 progress:
   phase: schematic
@@ -229,29 +426,35 @@ progress:
         - "[x] Analyze motor startup requirements"
         - "[x] Evaluate hybrid vs supercap-only"
         - "[x] Select supercapacitor (Tecate 12F)"
-        - "[x] Determine bank configuration (30S × 2 banks)"
+        - "[x] Determine bank configuration (30S x 2 banks)"
         - "[x] Choose MCU (STM32G031)"
         - "[x] Define charging strategy"
+        - "[x] Select switching topology (back-to-back FETs)"
+        - "[x] Define control strategy (droop-triggered)"
+        - "[x] Add precharge circuit design"
 
     schematic:
       status: pending
       checklist:
-        - "[ ] Power input section (fuse, varistor, filter)"
-        - "[ ] Voltage sensing (AC, supercap banks)"
-        - "[ ] Zero-crossing detection"
-        - "[ ] Current sensing"
+        - "[ ] Power input section (varistor, filter)"
+        - "[ ] Bus voltage sensing (fast + filtered)"
+        - "[ ] Bank voltage sensing (2 channels)"
+        - "[ ] Current sensing with hardware overcurrent"
         - "[ ] MCU and 3.3V regulation"
-        - "[ ] Charging circuits (2× banks)"
-        - "[ ] Discharge circuits (2× MOSFETs)"
+        - "[ ] Gate driver circuits (2x UCC27211)"
+        - "[ ] Back-to-back discharge FETs (4x IRFB4110)"
+        - "[ ] Precharge circuits (2x paths)"
+        - "[ ] Charging circuits (2x banks)"
         - "[ ] Status LED"
         - "[ ] Debug header"
-        - "[ ] Supercap symbols (60×)"
+        - "[ ] Supercap symbols (60x)"
 
     layout:
       status: pending
       checklist:
-        - "[ ] Board outline 150×100mm"
+        - "[ ] Board outline 150x100mm"
         - "[ ] Supercap placement (60 cells)"
+        - "[ ] FET and gate driver placement"
         - "[ ] High-current routing"
         - "[ ] Power plane pour"
         - "[ ] Signal routing"
@@ -263,12 +466,13 @@ progress:
       status: pending
       checklist:
         - "[ ] GPIO and peripheral init"
-        - "[ ] ADC sampling (V_ac, V_sc, I_load)"
-        - "[ ] Zero-crossing interrupt"
-        - "[ ] Motor start detection"
-        - "[ ] PWM discharge control"
-        - "[ ] Protection logic"
+        - "[ ] Fast ADC sampling (20kHz bus voltage)"
+        - "[ ] Droop detection algorithm"
+        - "[ ] State machine implementation"
+        - "[ ] Precharge sequencing"
+        - "[ ] Overcurrent handling"
         - "[ ] Status LED control"
+        - "[ ] Fault logging"
 
     prototype:
       status: pending
@@ -282,23 +486,28 @@ progress:
 
 bom:
   summary:
-    estimated_total: "$85"
+    estimated_total: "$105"
     categories:
       supercapacitors: "$54.60"
-      semiconductors: "$6.45"
-      passives: "$4.30"
-      connectors: "$2.90"
+      power_fets: "$6.00"
+      gate_drivers: "$2.40"
+      semiconductors: "$6.00"
+      protection: "$3.00"
+      passives: "$8.00"
+      connectors: "$3.00"
       pcb: "$15.00"
-      mechanical: "$1.40"
+      mechanical: "$2.00"
 
   key_parts:
-    - ref: "C1-C60"
+    # Supercapacitors
+    - ref: "C101-C160"
       part: "Tecate TPLH-2R7/12WR10X30"
       description: "12F 2.7V supercapacitor"
       qty: 60
       unit_cost: 0.91
       source: "DigiKey"
 
+    # MCU
     - ref: "U1"
       part: "STM32G031F6P6"
       description: "ARM Cortex-M0+ MCU, TSSOP20"
@@ -306,23 +515,97 @@ bom:
       unit_cost: 1.50
       source: "LCSC"
 
-    - ref: "Q1, Q2"
+    # Power FETs (back-to-back pairs)
+    - ref: "Q1-Q4"
       part: "IRFB4110"
-      description: "100V 180A N-MOSFET, TO-220"
-      qty: 2
+      description: "100V 180A N-MOSFET, TO-220 (back-to-back pairs)"
+      qty: 4
       unit_cost: 1.50
       source: "LCSC"
 
-    - ref: "U2"
+    # Gate drivers
+    - ref: "U2, U3"
+      part: "UCC27211"
+      description: "Half-bridge gate driver, 4A peak, UVLO, SOIC-8"
+      qty: 2
+      unit_cost: 1.20
+      source: "LCSC"
+
+    # Precharge FETs
+    - ref: "Q5, Q6"
+      part: "AO3400"
+      description: "N-MOSFET SOT-23 for precharge path"
+      qty: 2
+      unit_cost: 0.10
+      source: "LCSC"
+
+    # Gate protection - Vgs clamps
+    - ref: "D1-D4"
+      part: "SMBJ18A"
+      description: "18V TVS diode, gate-to-source clamp"
+      qty: 4
+      unit_cost: 0.15
+      source: "LCSC"
+
+    # Gate bleeders (prevent floating)
+    - ref: "R_GB1-R_GB4"
+      part: "10k 0805"
+      description: "Gate-to-source bleeder resistor"
+      qty: 4
+      unit_cost: 0.01
+      source: "LCSC"
+
+    # Gate failsafe pull-down (tied to NRST)
+    - ref: "Q7, Q8"
+      part: "2N7002"
+      description: "N-FET SOT-23 for gate failsafe pull-down"
+      qty: 2
+      unit_cost: 0.05
+      source: "LCSC"
+
+    # Current sensing
+    - ref: "U4"
+      part: "INA180A3"
+      description: "Current sense amplifier 100V/V, 2us response"
+      qty: 1
+      unit_cost: 1.00
+      source: "LCSC"
+
+    - ref: "R_SHUNT"
+      part: "5mR 2512 1%"
+      description: "Current shunt resistor, 2W"
+      qty: 1
+      unit_cost: 0.30
+      source: "LCSC"
+
+    # Overcurrent comparator with blanking
+    - ref: "U5"
+      part: "LM393"
+      description: "Dual comparator for hardware overcurrent trip"
+      qty: 1
+      unit_cost: 0.20
+      source: "LCSC"
+
+    # Zero-crossing detection
+    - ref: "U6"
       part: "H11AA1"
-      description: "AC input optocoupler"
+      description: "AC input optocoupler for zero-crossing/phase tracking"
       qty: 1
       unit_cost: 0.50
       source: "LCSC"
 
-    - ref: "U3"
-      part: "INA180A1"
-      description: "Current sense amplifier"
+    # LDO for gate driver supply (12V from rectified AC)
+    - ref: "U7"
+      part: "LM7812"
+      description: "12V 1A regulator for gate driver supply"
       qty: 1
-      unit_cost: 1.00
+      unit_cost: 0.30
+      source: "LCSC"
+
+    # 3.3V LDO for MCU
+    - ref: "U8"
+      part: "AMS1117-3.3"
+      description: "3.3V 1A LDO for MCU"
+      qty: 1
+      unit_cost: 0.20
       source: "LCSC"
