@@ -958,6 +958,11 @@ def create_softstart_schematic():
     wire(c11_p1[0], u8_vo[1], c12_p1[0], u8_vo[1])
     wire(c12_p1[0], u8_vo[1], c12_p1[0], c12_p1[1])
 
+    # Add PWR_FLAG on +3.3V rail to indicate it's a valid power source
+    # This allows distributed +3.3V power symbols to be recognized as powered
+    sch.add_pwr_flag(c12_p1[0] + 5, u8_vo[1])
+    wire(c12_p1[0], u8_vo[1], c12_p1[0] + 5, u8_vo[1])
+
     # Wire GND rail for 3.3V section
     gnd_3v3_y = c10_p2[1] + 5
     wire(c10_p2[0], c10_p2[1], c10_p2[0], gnd_3v3_y)
