@@ -439,7 +439,7 @@ def create_softstart_schematic():
     u_drv3 = sch.add_symbol(
         lib_id="Driver_FET:UCC27511ADBV",
         x=GATE_X, y=GATE_Y + 45,
-        ref="U6", value="UCC27511A",
+        ref="U9", value="UCC27511A",
         rotation=0,
         footprint="Package_TO_SOT_SMD:SOT-23-5"
     )
@@ -448,7 +448,7 @@ def create_softstart_schematic():
     u_drv4 = sch.add_symbol(
         lib_id="Driver_FET:UCC27511ADBV",
         x=GATE_X, y=GATE_Y + 75,
-        ref="U7", value="UCC27511A",
+        ref="U10", value="UCC27511A",
         rotation=0,
         footprint="Package_TO_SOT_SMD:SOT-23-5"
     )
@@ -984,8 +984,11 @@ def create_softstart_schematic():
     mcu_vss = u_mcu.pin_position("VSS")
 
     # Wire MCU VDD to 3.3V rail
-    wire(c12_p1[0], u8_vo[1], mcu_vdd[0], u8_vo[1])
-    wire(mcu_vdd[0], u8_vo[1], mcu_vdd[0], mcu_vdd[1])
+    # Route at a lower Y to avoid crossing through the +12V output area
+    mcu_pwr_y = u8_vo[1] + 15  # Below the power regulator output rail
+    wire(c12_p1[0], u8_vo[1], c12_p1[0], mcu_pwr_y)  # Down from 3.3V rail
+    wire(c12_p1[0], mcu_pwr_y, mcu_vdd[0], mcu_pwr_y)  # Horizontal to MCU
+    wire(mcu_vdd[0], mcu_pwr_y, mcu_vdd[0], mcu_vdd[1])  # Up to MCU VDD pin
 
     # Wire MCU VSS to GND
     wire(mcu_vss[0], mcu_vss[1], mcu_vss[0], gnd_3v3_y)
@@ -1414,11 +1417,9 @@ def create_softstart_schematic():
     wire(drv2_in_neg[0], drv2_in_neg[1], drv2_gnd[0], drv2_in_neg[1])
     wire(drv2_gnd[0], drv2_in_neg[1], drv2_gnd[0], drv2_gnd[1])
 
-    # Wire OUTL in parallel with OUTH (both outputs to gate resistor)
-    wire(drv1_outl[0], drv1_outl[1], r10_p1[0], drv1_outl[1])
-    wire(r10_p1[0], drv1_outl[1], r10_p1[0], drv1_out[1])
-    wire(drv2_outl[0], drv2_outl[1], r11_p1[0], drv2_outl[1])
-    wire(r11_p1[0], drv2_outl[1], r11_p1[0], drv2_out[1])
+    # Mark OUTL pins as no-connect (using OUTH only for gate drive)
+    sch.add_no_connect(drv1_outl[0], drv1_outl[1])
+    sch.add_no_connect(drv2_outl[0], drv2_outl[1])
 
     # Wire gate resistors to FET gates
     q1_g = q1.pin_position("G")
@@ -1568,11 +1569,9 @@ def create_softstart_schematic():
     wire(drv4_in_neg[0], drv4_in_neg[1], drv4_gnd[0], drv4_in_neg[1])
     wire(drv4_gnd[0], drv4_in_neg[1], drv4_gnd[0], drv4_gnd[1])
 
-    # Wire OUTL in parallel with OUTH (both outputs to gate resistor)
-    wire(drv3_outl[0], drv3_outl[1], r12_p1[0], drv3_outl[1])
-    wire(r12_p1[0], drv3_outl[1], r12_p1[0], drv3_out[1])
-    wire(drv4_outl[0], drv4_outl[1], r13_p1[0], drv4_outl[1])
-    wire(r13_p1[0], drv4_outl[1], r13_p1[0], drv4_out[1])
+    # Mark OUTL pins as no-connect (using OUTH only for gate drive)
+    sch.add_no_connect(drv3_outl[0], drv3_outl[1])
+    sch.add_no_connect(drv4_outl[0], drv4_outl[1])
 
     # Wire to Q3, Q4 gates
     q3_g = q3.pin_position("G")
