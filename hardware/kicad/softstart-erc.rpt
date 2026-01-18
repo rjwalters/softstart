@@ -1,0 +1,13 @@
+ERC report (2026-01-17T22:16:54-0800, Encoding UTF8)
+
+***** Sheet /
+[multiple_net_names]: Both GND and SC_NEG_MINUS are attached to the same items; GND will be used in the netlist
+    ; warning
+    @(190.50 mm, 48.26 mm): Symbol #PWR02 Pin 1 [Power input, Line]
+    @(165.10 mm, 199.39 mm): Label 'SC_NEG_MINUS'
+[multiple_net_names]: Both SC_NEG_PLUS and SC_POS_MINUS are attached to the same items; SC_NEG_PLUS will be used in the netlist
+    ; warning
+    @(219.71 mm, 171.45 mm): Label 'SC_NEG_PLUS'
+    @(387.35 mm, 95.25 mm): Label 'SC_POS_MINUS'
+
+ ** ERC messages: 2  Errors 0  Warnings 2

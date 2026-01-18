@@ -840,29 +840,36 @@ def create_softstart_schematic():
     j2_p1 = j_ac_out.pin_position("1")
     j2_p2 = j_ac_out.pin_position("2")
 
+    # Debug: print pin positions
+    print(f"  J1.1 position: {j1_p1}")
+    print(f"  J1.2 position: {j1_p2}")
+
     # Wire J1.1 -> RV1.1 -> J2.1 (AC Line)
-    # Use offset X for junction to avoid vertical wire overlap with AC_N
-    ac_l_junc_x = rv1_p1[0] - 5  # Offset left
-    wire(j1_p1[0], j1_p1[1], ac_l_junc_x, j1_p1[1])
-    wire(ac_l_junc_x, j1_p1[1], ac_l_junc_x, rv1_p1[1])
-    wire(ac_l_junc_x, rv1_p1[1], rv1_p1[0], rv1_p1[1])
-    wire(ac_l_junc_x, j1_p1[1], j2_p1[0], j1_p1[1])
-    wire(j2_p1[0], j1_p1[1], j2_p1[0], j2_p1[1])
+    # Route horizontally from J1.1 to varistor junction, then to J2.1
+    ac_l_junc_x = rv1_p1[0] - 5  # Junction X left of varistor
+    # Create junction point at same Y as both J1.1 and J2.1 (they should be same Y)
+    ac_l_y = j1_p1[1]
+    wire(j1_p1[0], j1_p1[1], ac_l_junc_x, ac_l_y)  # J1.1 to junction
+    wire(ac_l_junc_x, ac_l_y, ac_l_junc_x, rv1_p1[1])  # Junction down to varistor level
+    wire(ac_l_junc_x, rv1_p1[1], rv1_p1[0], rv1_p1[1])  # Horizontal to varistor pin 1
+    wire(ac_l_junc_x, ac_l_y, j2_p1[0], ac_l_y)  # Junction to J2 X
+    wire(j2_p1[0], ac_l_y, j2_p1[0], j2_p1[1])  # Down to J2.1
 
     # Wire J1.2 -> RV1.2 -> J2.2 (AC Neutral)
-    # Use offset X for junction to avoid vertical wire overlap with AC_L
-    ac_n_junc_x = rv1_p2[0] + 5  # Offset right
-    wire(j1_p2[0], j1_p2[1], ac_n_junc_x, j1_p2[1])
-    wire(ac_n_junc_x, j1_p2[1], ac_n_junc_x, rv1_p2[1])
-    wire(ac_n_junc_x, rv1_p2[1], rv1_p2[0], rv1_p2[1])
-    wire(ac_n_junc_x, j1_p2[1], j2_p2[0], j1_p2[1])
-    wire(j2_p2[0], j1_p2[1], j2_p2[0], j2_p2[1])
+    # Route horizontally from J1.2 to varistor junction, then to J2.2
+    ac_n_junc_x = rv1_p2[0] + 5  # Junction X right of varistor
+    ac_n_y = j1_p2[1]  # Use J1.2 Y for horizontal bus
+    wire(j1_p2[0], j1_p2[1], ac_n_junc_x, ac_n_y)  # J1.2 to junction
+    wire(ac_n_junc_x, ac_n_y, ac_n_junc_x, rv1_p2[1])  # Junction to varistor level
+    wire(ac_n_junc_x, rv1_p2[1], rv1_p2[0], rv1_p2[1])  # Horizontal to varistor pin 2
+    wire(ac_n_junc_x, ac_n_y, j2_p2[0], ac_n_y)  # Junction to J2 X
+    wire(j2_p2[0], ac_n_y, j2_p2[0], j2_p2[1])  # To J2.2
 
     # Move labels to wire intersections - use global labels for AC connections
     sch.remove_label("AC_L")
     sch.remove_label("AC_N")
-    sch.add_global_label("AC_L", ac_l_junc_x, j1_p1[1], shape="passive")
-    sch.add_global_label("AC_N", ac_n_junc_x, j1_p2[1], shape="passive")
+    sch.add_global_label("AC_L", ac_l_junc_x, ac_l_y, shape="passive")
+    sch.add_global_label("AC_N", ac_n_junc_x, ac_n_y, shape="passive")
 
     # -------------------------------------------------------------------------
     # 12V Power Supply wiring
@@ -889,10 +896,17 @@ def create_softstart_schematic():
     c9_p2 = c_12v_out.pin_position("2")
 
     # Wire bridge AC inputs - use global labels
-    wire(bridge_ac1[0] - 5, bridge_ac1[1], bridge_ac1[0], bridge_ac1[1])
-    sch.add_global_label("AC_L", bridge_ac1[0] - 5, bridge_ac1[1], shape="passive")
-    wire(bridge_ac2[0] + 5, bridge_ac2[1], bridge_ac2[0], bridge_ac2[1])
-    sch.add_global_label("AC_N", bridge_ac2[0] + 5, bridge_ac2[1], shape="passive")
+    # Route AC labels away from the GND bus (which is at y=gnd_y ≈ 43.18)
+    # The bridge AC pins are close to that Y level, so route vertically first to avoid intersection
+    ac_route_y = bridge_ac1[1] - 10  # 10mm above the AC pin (lower Y = higher on screen)
+    wire(bridge_ac1[0], bridge_ac1[1], bridge_ac1[0], ac_route_y)  # Vertical up from AC1 pin
+    wire(bridge_ac1[0], ac_route_y, bridge_ac1[0] - 5, ac_route_y)  # Horizontal stub left
+    sch.add_global_label("AC_L", bridge_ac1[0] - 5, ac_route_y, shape="passive")
+
+    ac_n_route_y = bridge_ac2[1] + 10  # 10mm below the AC pin (higher Y = lower on screen)
+    wire(bridge_ac2[0], bridge_ac2[1], bridge_ac2[0], ac_n_route_y)  # Vertical down from AC2 pin
+    wire(bridge_ac2[0], ac_n_route_y, bridge_ac2[0] + 5, ac_n_route_y)  # Horizontal stub right
+    sch.add_global_label("AC_N", bridge_ac2[0] + 5, ac_n_route_y, shape="passive")
 
     # Wire bridge+ -> C8.1 -> L7812.VI
     wire(bridge_pos[0], bridge_pos[1], c8_p1[0], bridge_pos[1])
@@ -912,10 +926,12 @@ def create_softstart_schematic():
     sch.add_label("+12V", c9_p1[0] + 5, u7_vo[1])
 
     # Wire GND: C8.2 -> L7812.GND -> C9.2
-    gnd_y = c8_p2[1] + 5
+    # Use the actual GND pin Y coordinate to ensure connection
+    gnd_y = u7_gnd[1]  # Use U7 GND pin Y as the bus Y
+    print(f"  12V GND wiring: u7_gnd={u7_gnd}, c8_p2={c8_p2}, c9_p2={c9_p2}, gnd_y={gnd_y}")
     wire(c8_p2[0], c8_p2[1], c8_p2[0], gnd_y)
     wire(c8_p2[0], gnd_y, u7_gnd[0], gnd_y)
-    wire(u7_gnd[0], gnd_y, u7_gnd[0], u7_gnd[1])
+    # Wire directly TO the GND pin (the previous wire already reaches it)
     wire(u7_gnd[0], gnd_y, c9_p2[0], gnd_y)
     wire(c9_p2[0], gnd_y, c9_p2[0], c9_p2[1])
 
@@ -927,9 +943,10 @@ def create_softstart_schematic():
     sch.add_power("power:GND", u7_gnd[0], gnd_y + 5)
     # Wire the GND power symbol to the GND rail
     wire(u7_gnd[0], gnd_y, u7_gnd[0], gnd_y + 5)
-    # Add PWR_FLAG on GND to indicate it's a valid power return path
-    sch.add_pwr_flag(u7_gnd[0] + 5, gnd_y + 5)
-    wire(u7_gnd[0], gnd_y + 5, u7_gnd[0] + 5, gnd_y + 5)
+    # Add PWR_FLAG on GND to mark it as a valid power source
+    # Note: power:GND symbols have power INPUT pins (not output), so PWR_FLAG is needed
+    sch.add_pwr_flag(u7_gnd[0] + 5, gnd_y)
+    wire(u7_gnd[0] + 5, gnd_y, u7_gnd[0], gnd_y)
 
     # -------------------------------------------------------------------------
     # 3.3V Power Supply wiring
@@ -958,16 +975,21 @@ def create_softstart_schematic():
     wire(c11_p1[0], u8_vo[1], c12_p1[0], u8_vo[1])
     wire(c12_p1[0], u8_vo[1], c12_p1[0], c12_p1[1])
 
-    # Add PWR_FLAG on +3.3V rail to indicate it's a valid power source
-    # This allows distributed +3.3V power symbols to be recognized as powered
-    sch.add_pwr_flag(c12_p1[0] + 5, u8_vo[1])
-    wire(c12_p1[0], u8_vo[1], c12_p1[0] + 5, u8_vo[1])
+    # Add +3.3V power symbol on AMS1117 output rail to connect it to the global +3.3V net
+    # This is required because power symbols connect by name globally in KiCad - without
+    # this symbol, the +3.3V power symbols on bypass caps would be on an isolated net.
+    # The AMS1117-3.3 VO pin is a power output, so it drives all connected +3.3V power inputs.
+    wire(c12_p1[0], u8_vo[1], c12_p1[0] + 5, u8_vo[1])  # Extend wire for label
+    sch.add_power("power:+3.3V", c12_p1[0] + 5, u8_vo[1] - 5)
+    wire(c12_p1[0] + 5, u8_vo[1] - 5, c12_p1[0] + 5, u8_vo[1])
 
     # Wire GND rail for 3.3V section
-    gnd_3v3_y = c10_p2[1] + 5
+    # Use the actual GND pin Y coordinate to ensure connection
+    gnd_3v3_y = u8_gnd[1]  # Use U8 GND pin Y as the bus Y
+    print(f"  3.3V GND wiring: u8_gnd={u8_gnd}, u8_vo={u8_vo}, gnd_3v3_y={gnd_3v3_y}")
     wire(c10_p2[0], c10_p2[1], c10_p2[0], gnd_3v3_y)
     wire(c10_p2[0], gnd_3v3_y, u8_gnd[0], gnd_3v3_y)
-    wire(u8_gnd[0], gnd_3v3_y, u8_gnd[0], u8_gnd[1])
+    # Wire directly TO the GND pin (the previous wire already reaches it)
     wire(u8_gnd[0], gnd_3v3_y, c11_p2[0], gnd_3v3_y)
     wire(c11_p2[0], gnd_3v3_y, c11_p2[0], c11_p2[1])
     wire(c11_p2[0], gnd_3v3_y, c12_p2[0], gnd_3v3_y)
@@ -982,13 +1004,18 @@ def create_softstart_schematic():
     # -------------------------------------------------------------------------
     mcu_vdd = u_mcu.pin_position("VDD")
     mcu_vss = u_mcu.pin_position("VSS")
+    print(f"  MCU power pins: VDD={mcu_vdd}, VSS={mcu_vss}")
 
     # Wire MCU VDD to 3.3V rail
-    # Route at a lower Y to avoid crossing through the +12V output area
+    # IMPORTANT: Route to the LEFT of C12 to avoid overlapping with C12 GND wires at c12_p2[0]
+    # The GND bus is at y=43.18 and GND symbol at y=48.18, so we need to avoid that X column
     mcu_pwr_y = u8_vo[1] + 15  # Below the power regulator output rail
-    wire(c12_p1[0], u8_vo[1], c12_p1[0], mcu_pwr_y)  # Down from 3.3V rail
-    wire(c12_p1[0], mcu_pwr_y, mcu_vdd[0], mcu_pwr_y)  # Horizontal to MCU
-    wire(mcu_vdd[0], mcu_pwr_y, mcu_vdd[0], mcu_vdd[1])  # Up to MCU VDD pin
+    # Route horizontally at the 3.3V rail level to avoid the C12 GND vertical wire
+    vdd_route_x = c12_p1[0] - 10  # 10mm LEFT of C12 to avoid crossing its GND wire
+    wire(c12_p1[0], u8_vo[1], vdd_route_x, u8_vo[1])  # Horizontal left at 3.3V rail level
+    wire(vdd_route_x, u8_vo[1], vdd_route_x, mcu_pwr_y)  # Down to routing Y level
+    wire(vdd_route_x, mcu_pwr_y, mcu_vdd[0], mcu_pwr_y)  # Horizontal to MCU VDD X
+    wire(mcu_vdd[0], mcu_pwr_y, mcu_vdd[0], mcu_vdd[1])  # Vertical to MCU VDD pin
 
     # Wire MCU VSS to GND
     wire(mcu_vss[0], mcu_vss[1], mcu_vss[0], gnd_3v3_y)
@@ -1053,6 +1080,7 @@ def create_softstart_schematic():
     j3_p3 = j_swd.pin_position("3")  # SWCLK
     j3_p4 = j_swd.pin_position("4")  # GND
     j3_p5 = j_swd.pin_position("5")  # NRST
+    print(f"  SWD connector pins: P1(VCC)={j3_p1}, P2(SWDIO)={j3_p2}, P3(SWCLK)={j3_p3}, P4(GND)={j3_p4}, P5(NRST)={j3_p5}")
 
     # VCC and GND connect to power symbols
     swd_pwr_x = j3_p1[0] - 10
@@ -1070,17 +1098,27 @@ def create_softstart_schematic():
     mcu_swclk = u_mcu.pin_position("PA14/PA15")
     mcu_nrst = u_mcu.pin_position("PF2")
 
-    # SWDIO: Use global labels directly on pins (no stub wires to avoid crossings)
-    sch.add_global_label("SWDIO", mcu_swdio[0], mcu_swdio[1], shape="bidirectional")
-    sch.add_global_label("SWDIO", j3_p2[0], j3_p2[1], shape="bidirectional")
+    # SWDIO: Add wire stubs then global labels (labels need wires to connect)
+    # Use shorter stubs (3mm) on SWD connector side to avoid C12 GND wire at c12_p2[0] ≈ 279.4
+    swdio_stub = 5 if mcu_swdio[0] > MCU_X else -5
+    wire(mcu_swdio[0], mcu_swdio[1], mcu_swdio[0] + swdio_stub, mcu_swdio[1])
+    sch.add_global_label("SWDIO", mcu_swdio[0] + swdio_stub, mcu_swdio[1], shape="bidirectional")
+    wire(j3_p2[0], j3_p2[1], j3_p2[0] - 3, j3_p2[1])  # Shorter stub to avoid power wires
+    sch.add_global_label("SWDIO", j3_p2[0] - 3, j3_p2[1], shape="bidirectional")
 
-    # SWCLK: Use global labels directly on pins
-    sch.add_global_label("SWCLK", mcu_swclk[0], mcu_swclk[1], shape="output")
-    sch.add_global_label("SWCLK", j3_p3[0], j3_p3[1], shape="input")
+    # SWCLK: Add wire stubs then global labels
+    swclk_stub = 5 if mcu_swclk[0] > MCU_X else -5
+    wire(mcu_swclk[0], mcu_swclk[1], mcu_swclk[0] + swclk_stub, mcu_swclk[1])
+    sch.add_global_label("SWCLK", mcu_swclk[0] + swclk_stub, mcu_swclk[1], shape="output")
+    wire(j3_p3[0], j3_p3[1], j3_p3[0] - 3, j3_p3[1])  # Shorter stub to avoid power wires
+    sch.add_global_label("SWCLK", j3_p3[0] - 3, j3_p3[1], shape="input")
 
-    # NRST: Use global labels directly on pins
-    sch.add_global_label("NRST", mcu_nrst[0], mcu_nrst[1], shape="bidirectional")
-    sch.add_global_label("NRST", j3_p5[0], j3_p5[1], shape="bidirectional")
+    # NRST: Add wire stubs then global labels (PF2 is the reset pin)
+    nrst_stub = 5 if mcu_nrst[0] > MCU_X else -5
+    wire(mcu_nrst[0], mcu_nrst[1], mcu_nrst[0] + nrst_stub, mcu_nrst[1])
+    sch.add_global_label("NRST", mcu_nrst[0] + nrst_stub, mcu_nrst[1], shape="bidirectional")
+    wire(j3_p5[0], j3_p5[1], j3_p5[0] - 3, j3_p5[1])  # Shorter stub to avoid power wires
+    sch.add_global_label("NRST", j3_p5[0] - 3, j3_p5[1], shape="bidirectional")
 
     # -------------------------------------------------------------------------
     # Zero-Crossing Detection Wiring
