@@ -4070,7 +4070,7 @@
         )
       )
     )
-    (property "Value" "100uF"
+    (property "Value" "1000uF 25V"
       (at 165.1 41.91 0)
       (effects
         (font
@@ -4078,7 +4078,7 @@
         )
       )
     )
-    (property "Footprint" "Capacitor_SMD:C_1206_3216Metric"
+    (property "Footprint" "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm"
       (at 165.1 44.45 0)
       (effects
         (font

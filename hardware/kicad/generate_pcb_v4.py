@@ -71,7 +71,7 @@ def get_placements() -> dict[str, tuple[float, float, float]]:
 
     # 12V supply
     p["D5"] = (PWR_X - 25, PWR_Y, 0)       # Bridge rectifier MB6S
-    p["C8"] = (PWR_X - 10, PWR_Y + 8, 0)   # 100uF input cap
+    p["C8"] = (PWR_X - 12, PWR_Y + 10, 0)  # 1000uF 25V bulk cap (10mm radial)
     p["U7"] = (PWR_X, PWR_Y, 0)            # LM7812
     p["C9"] = (PWR_X + 12, PWR_Y + 8, 0)   # 10uF output cap
 
