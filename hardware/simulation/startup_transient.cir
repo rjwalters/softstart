@@ -1,0 +1,168 @@
+* Startup Transient Simulation
+* =============================
+* Simulates power-on behavior when supercaps are fully discharged
+* Monitors MCU supply stability during initial charging
+*
+* Key questions:
+*   1. Does the 12V rail stay above LM7812 dropout during precharge?
+*   2. Does the 3.3V rail stay above MCU brown-out threshold?
+*   3. How long until the MCU supply is stable?
+
+.title Softstart MCU Supply - Startup Transient Analysis
+
+* Include component models
+.include lib/components.lib
+
+*=============================================================================
+* Circuit Parameters
+*=============================================================================
+
+* Generator parameters
+.param GEN_VRMS=120          ; Generator RMS voltage
+.param GEN_FREQ=60           ; Generator frequency (Hz)
+.param GEN_ZINT=2            ; Generator internal impedance (Ohms)
+
+* Bulk capacitor
+.param C_BULK=1000u          ; C8 - input bulk cap to LM7812
+
+* Precharge resistors (two paths in parallel)
+.param R_PRECH1=100          ; R16, R17 - main precharge
+.param R_PRECH2=220          ; R23, R24 - secondary precharge
+
+* Supercap initial conditions (fully discharged = worst case)
+.param SC_INIT_V=0           ; Initial supercap bank voltage
+
+*=============================================================================
+* Power Source - Generator
+*=============================================================================
+
+* AC source with internal impedance
+Vgen ac_hot 0 SIN(0 {GEN_VRMS*1.414} {GEN_FREQ})
+Rgen ac_hot ac_l {GEN_ZINT}
+
+* Neutral reference
+Vn ac_n 0 0
+
+*=============================================================================
+* MCU Power Supply Chain
+*=============================================================================
+
+* Bridge rectifier for MCU supply (D5 - MB6S)
+* Simplified as two diodes for half-wave, or full bridge
+D1 ac_l rect_pos DFAST
+D2 ac_n rect_pos DFAST
+D3 0 ac_l DFAST
+D4 0 ac_n DFAST
+.model DFAST D(Is=1e-14 Rs=0.1 BV=600)
+
+* Bulk capacitor C8 (1000uF 25V)
+C_bulk rect_pos 0 {C_BULK} IC=0
+
+* LM7812 voltage regulator (U7)
+Xlm7812 rect_pos 0 rail_12v LM7812
+
+* Output cap C9 (10uF)
+C9 rail_12v 0 10u IC=0
+
+* AMS1117-3.3 LDO (U8)
+Xams1117 rail_12v 0 rail_3v3 AMS1117
+
+* Output caps C1, C2 (10uF each)
+C1 rail_3v3 0 10u IC=0
+C2 rail_3v3 0 10u IC=0
+
+* MCU load model
+Xmcu rail_3v3 0 mcu_reset STM32_LOAD
+
+*=============================================================================
+* Supercapacitor Banks with Precharge
+*=============================================================================
+
+* For startup analysis, we model the supercap charging current
+* as loading on the AC line (which affects rectified voltage)
+
+* Positive supercap bank (30S = 81V max, 0.4F)
+* Precharge through R16/R17 (100 ohm)
+Rprech1 rect_pos scap_pos {R_PRECH1/2}
+Xscap_pos scap_pos scap_mid SUPERCAP_BANK_30S IC={SC_INIT_V/2}
+
+* Negative supercap bank
+Rprech2 scap_mid scap_neg {R_PRECH2/2}
+Xscap_neg scap_mid scap_neg SUPERCAP_BANK_30S IC={SC_INIT_V/2}
+
+* Return to rectifier negative (simplified - actual circuit is more complex)
+Rret scap_neg 0 0.1
+
+*=============================================================================
+* Analysis
+*=============================================================================
+
+* Initial conditions
+.ic V(rect_pos)=0 V(rail_12v)=0 V(rail_3v3)=0
+
+* Transient analysis - 2 seconds to capture startup
+.tran 100u 2s 0 100u uic
+
+*=============================================================================
+* Output Control
+*=============================================================================
+
+.control
+    run
+
+    * Plot key voltages
+    set hcopydevtype=svg
+    set hcopypscolor=1
+
+    * Plot 1: All supply rails
+    plot v(rect_pos) v(rail_12v) v(rail_3v3)*10 title 'Supply Rails During Startup'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Plot 2: MCU supply detail with reset status
+    plot v(rail_3v3) v(mcu_reset) title 'MCU Supply and Reset Status'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Plot 3: Supercap voltage
+    plot v(scap_pos) v(scap_mid) v(scap_neg) title 'Supercap Bank Voltages'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Measurements
+    echo ""
+    echo "=== Startup Transient Measurements ==="
+
+    * Find minimum 3.3V rail voltage
+    meas tran v3v3_min MIN v(rail_3v3)
+
+    * Find minimum 12V rail voltage
+    meas tran v12v_min MIN v(rail_12v)
+
+    * Find time when 3.3V rail exceeds 3.0V (stable)
+    meas tran t_stable WHEN v(rail_3v3)=3.0 RISE=1
+
+    * Find time when MCU reset deasserts
+    meas tran t_reset WHEN v(mcu_reset)=1.65 RISE=1
+
+    * Check if brownout occurred (3.3V < 2.0V after initial rise)
+    meas tran v3v3_at_100ms FIND v(rail_3v3) AT=0.1
+
+    echo ""
+    echo "=== Pass/Fail Criteria ==="
+    if v3v3_min < 2.0
+        echo "FAIL: 3.3V rail dropped below brownout threshold (2.0V)"
+        echo "      Minimum was: $&v3v3_min V"
+    else
+        echo "PASS: 3.3V rail stayed above brownout threshold"
+        echo "      Minimum was: $&v3v3_min V"
+    end
+
+    if v12v_min < 10
+        echo "WARNING: 12V rail dropped below 10V"
+        echo "         LM7812 may be in dropout"
+    end
+
+    * Write data to file
+    wrdata results/startup_transient.csv v(rect_pos) v(rail_12v) v(rail_3v3) v(mcu_reset) v(scap_pos)
+
+.endc
+
+.end

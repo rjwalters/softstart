@@ -1,0 +1,187 @@
+* Droop Event Simulation
+* =======================
+* Simulates generator voltage droop that triggers supercap assist
+* Models the transition when supercaps start discharging into the bus
+*
+* Key questions:
+*   1. Does MCU supply remain stable during droop detection?
+*   2. Does the transition from charging to discharging cause glitches?
+*   3. What's the recovery behavior when generator voltage returns?
+
+.title Softstart MCU Supply - Droop Event Analysis
+
+* Include component models
+.include lib/components.lib
+
+*=============================================================================
+* Circuit Parameters
+*=============================================================================
+
+* Generator parameters
+.param GEN_VRMS=120          ; Normal RMS voltage
+.param GEN_FREQ=60           ; Frequency
+.param GEN_ZINT=2            ; Internal impedance
+.param DROOP_PCT=25          ; Voltage droop percentage
+
+* Timing
+.param T_DROOP_START=0.5     ; When droop begins (s)
+.param T_DROOP_DURATION=0.2  ; How long droop lasts (s)
+
+* Initial supercap voltage (charged to operating point)
+.param SC_INIT_V=60          ; Supercaps charged to ~74% (60V of 81V max)
+
+* Bulk capacitor
+.param C_BULK=1000u          ; C8
+
+*=============================================================================
+* Power Source - Generator with Programmable Droop
+*=============================================================================
+
+* Control signal for droop (0=normal, 1=drooped)
+* Uses PWL for controlled timing
+Vdroop_ctrl droop_ctrl 0 PWL(
++   0 0
++   {T_DROOP_START} 0
++   {T_DROOP_START + 1m} 1
++   {T_DROOP_START + T_DROOP_DURATION} 1
++   {T_DROOP_START + T_DROOP_DURATION + 1m} 0
++   10 0
++ )
+
+* Generator voltage source (varies with droop control)
+.param VPEAK={GEN_VRMS * 1.414}
+.param VPEAK_DROOP={VPEAK * (100 - DROOP_PCT) / 100}
+
+* Behavioral voltage source with droop
+Bgen ac_hot_int 0 V={sin(6.28318 * GEN_FREQ * time) * (VPEAK - (VPEAK - VPEAK_DROOP) * V(droop_ctrl))}
+Rgen ac_hot_int ac_l {GEN_ZINT}
+
+* Neutral
+Vn ac_n 0 0
+
+*=============================================================================
+* MCU Power Supply Chain
+*=============================================================================
+
+* Bridge rectifier (D5)
+D1 ac_l rect_pos DFAST
+D2 ac_n rect_pos DFAST
+D3 0 ac_l DFAST
+D4 0 ac_n DFAST
+.model DFAST D(Is=1e-14 Rs=0.1 BV=600)
+
+* Bulk capacitor C8
+C_bulk rect_pos 0 {C_BULK} IC={VPEAK*1.2}
+
+* LM7812
+Xlm7812 rect_pos 0 rail_12v LM7812
+
+* C9
+C9 rail_12v 0 10u IC=12
+
+* AMS1117-3.3
+Xams1117 rail_12v 0 rail_3v3 AMS1117
+
+* C1, C2
+C1 rail_3v3 0 10u IC=3.3
+C2 rail_3v3 0 10u IC=3.3
+
+* MCU load
+Xmcu rail_3v3 0 mcu_reset STM32_LOAD
+
+*=============================================================================
+* Supercapacitor System (Simplified)
+*=============================================================================
+
+* Model the supercap bank effect on the main bus
+* During droop, supercaps would discharge through MOSFETs
+* This creates additional load/source on the shared AC
+
+* Positive bank - models the energy reservoir
+Cscap_pos scap_bus 0 0.4 IC={SC_INIT_V}
+Rscap_esr scap_bus scap_node 0.9
+
+* During droop, supercaps feed current to the bus
+* Model this as a controlled current source
+* Discharge current depends on voltage difference
+Bdischarge rect_pos scap_node I={
++   (V(droop_ctrl) > 0.5) ?
++   max(0, (V(scap_bus) - V(rect_pos)) / 5) :
++   0
++ }
+
+* During normal operation, slow charging through precharge resistors
+Rprecharge rect_pos scap_bus 500
+
+*=============================================================================
+* Analysis
+*=============================================================================
+
+.tran 50u 1s 0 50u
+
+*=============================================================================
+* Output Control
+*=============================================================================
+
+.control
+    run
+
+    set hcopydevtype=svg
+
+    * Plot 1: Droop event overview
+    plot v(ac_l) v(droop_ctrl)*50 title 'AC Line Voltage and Droop Event'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Plot 2: Rectified and regulated rails
+    plot v(rect_pos) v(rail_12v) v(rail_3v3)*10 title 'DC Rails During Droop'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Plot 3: MCU supply detail
+    plot v(rail_3v3) v(mcu_reset) title 'MCU Supply During Droop Event'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Plot 4: Supercap behavior
+    plot v(scap_bus) v(rect_pos) title 'Supercap vs Rectified Voltage'
+    + xlabel 'Time (s)' ylabel 'Voltage (V)'
+
+    * Measurements
+    echo ""
+    echo "=== Droop Event Measurements ==="
+
+    * Measure voltages during droop
+    meas tran v3v3_droop_min MIN v(rail_3v3) FROM={T_DROOP_START} TO={T_DROOP_START + T_DROOP_DURATION}
+    meas tran v12v_droop_min MIN v(rail_12v) FROM={T_DROOP_START} TO={T_DROOP_START + T_DROOP_DURATION}
+    meas tran vrect_droop_min MIN v(rect_pos) FROM={T_DROOP_START} TO={T_DROOP_START + T_DROOP_DURATION}
+
+    * Check for any reset events during droop
+    meas tran reset_during_droop MIN v(mcu_reset) FROM={T_DROOP_START} TO={T_DROOP_START + T_DROOP_DURATION}
+
+    * Measure ripple on 3.3V during droop
+    meas tran v3v3_droop_max MAX v(rail_3v3) FROM={T_DROOP_START} TO={T_DROOP_START + T_DROOP_DURATION}
+
+    echo ""
+    echo "=== Pass/Fail Criteria ==="
+
+    if v3v3_droop_min < 3.0
+        echo "WARNING: 3.3V rail dropped below 3.0V during droop"
+        echo "         Minimum: $&v3v3_droop_min V"
+    else
+        echo "PASS: 3.3V rail stayed above 3.0V during droop"
+        echo "      Minimum: $&v3v3_droop_min V"
+    end
+
+    if reset_during_droop < 1.0
+        echo "FAIL: MCU reset during droop event!"
+    else
+        echo "PASS: No MCU reset during droop"
+    end
+
+    let ripple = v3v3_droop_max - v3v3_droop_min
+    echo "3.3V ripple during droop: $&ripple V"
+
+    * Write data
+    wrdata results/droop_event.csv v(rect_pos) v(rail_12v) v(rail_3v3) v(mcu_reset) v(scap_bus) v(droop_ctrl)
+
+.endc
+
+.end

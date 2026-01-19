@@ -1,0 +1,176 @@
+* Component Models for Softstart Power Supply Simulation
+* For use with ngspice or compatible SPICE simulators
+
+*=============================================================================
+* LM7812 - 12V Linear Regulator (Behavioral Model)
+*=============================================================================
+* Pins: IN GND OUT
+* Key characteristics:
+*   - Dropout voltage: ~2.5V (needs 14.5V in for 12V out)
+*   - Output current: up to 1.5A
+*   - Line regulation: 4mV/V typical
+*   - Load regulation: 12mV/A typical
+*   - Quiescent current: ~5mA
+
+.subckt LM7812 IN GND OUT
+* Internal parameters
+.param Vout=12 Vdrop=2.5 Iq=5m Rout=0.012
+
+* Input current (quiescent + load reflected)
+Gq IN GND VALUE={Iq + I(Vout_sense)*(Vout/V(IN,GND))}
+
+* Output voltage with dropout behavior
+* Uses tanh for smooth transition into dropout
+Eout out_int GND VALUE={
++   Vout * 0.5 * (1 + tanh(10*(V(IN,GND) - Vout - Vdrop)))
++ }
+
+* Output impedance and current sensing
+Rout out_int OUT {Rout}
+Vout_sense OUT out_sense 0
+Rload out_sense GND 1G
+
+.ends LM7812
+
+
+*=============================================================================
+* AMS1117-3.3 - 3.3V LDO Regulator (Behavioral Model)
+*=============================================================================
+* Pins: IN GND OUT
+* Key characteristics:
+*   - Dropout voltage: 1.1V at 1A (lower at light loads)
+*   - Output current: up to 1A
+*   - Quiescent current: ~5mA
+*   - Requires output capacitor for stability
+
+.subckt AMS1117 IN GND OUT
+.param Vout=3.3 Vdrop=1.1 Iq=5m Rout=0.05
+
+* Input current
+Gq IN GND VALUE={Iq + I(Vout_sense)*(Vout/MAX(V(IN,GND),0.1))}
+
+* Output with dropout (smooth transition)
+Eout out_int GND VALUE={
++   Vout * 0.5 * (1 + tanh(20*(V(IN,GND) - Vout - Vdrop)))
++ }
+
+* Output impedance
+Rout out_int OUT {Rout}
+Vout_sense OUT out_sense 0
+Rload out_sense GND 1G
+
+.ends AMS1117
+
+
+*=============================================================================
+* Supercapacitor Bank Model
+*=============================================================================
+* Single 2.7V 12F supercap with ESR
+* Pins: POS NEG
+* 30 caps in series = 81V max, 0.4F equivalent
+* ESR per cap ~30mOhm, total 30*30m = 0.9 Ohm per bank
+
+.subckt SUPERCAP_CELL POS NEG IC=0
+.param Cap=12 ESR=0.030
+
+Resr POS cap_int {ESR}
+Ccap cap_int NEG {Cap} IC={IC}
+
+.ends SUPERCAP_CELL
+
+* 30-cell series bank (2.7V cells -> 81V max, 0.4F)
+.subckt SUPERCAP_BANK_30S POS NEG IC=0
+.param Cell_Cap=12 Cell_ESR=0.030 Cell_V=2.7
+
+* Equivalent bank parameters:
+* Total C = 12F/30 = 0.4F
+* Total ESR = 30 * 30mOhm = 0.9 Ohm
+* Max V = 30 * 2.7V = 81V
+
+Resr POS cap_int {Cell_ESR * 30}
+Cbank cap_int NEG {Cell_Cap / 30} IC={IC}
+
+.ends SUPERCAP_BANK_30S
+
+
+*=============================================================================
+* Bridge Rectifier Model (MB6S equivalent)
+*=============================================================================
+* Pins: AC1 AC2 PLUS MINUS
+* Uses ideal diodes with forward drop
+
+.subckt BRIDGE_RECT AC1 AC2 PLUS MINUS
+.param Vf=0.7 Ron=0.1
+
+D1 AC1 PLUS DBRIDGE
+D2 AC2 PLUS DBRIDGE
+D3 MINUS AC1 DBRIDGE
+D4 MINUS AC2 DBRIDGE
+
+.model DBRIDGE D(Is=1e-14 N=1.0 Rs={Ron} BV=600)
+
+.ends BRIDGE_RECT
+
+
+*=============================================================================
+* Generator AC Source Model
+*=============================================================================
+* Models a small portable generator with:
+*   - Internal impedance (affects voltage under load)
+*   - Frequency (60Hz)
+*   - Ability to simulate voltage droop
+* Pins: L N
+* Parameters: Vrms (RMS voltage), Zint (internal impedance)
+
+.subckt GENERATOR L N
+.param Vrms=120 Freq=60 Zint=2
+
+* Peak voltage from RMS
+.param Vpeak={Vrms * 1.414}
+
+* Internal source
+Vgen gen_int N SIN(0 {Vpeak} {Freq})
+
+* Internal impedance (resistive + slight inductance)
+Rint gen_int L {Zint}
+
+.ends GENERATOR
+
+* Generator with controllable droop
+* CTRL pin: 0=normal, 1=droop (voltage drops by DroopPct)
+.subckt GENERATOR_DROOP L N CTRL
+.param Vrms=120 Freq=60 Zint=2 DroopPct=25
+
+.param Vpeak={Vrms * 1.414}
+.param Vpeak_droop={Vpeak * (100-DroopPct) / 100}
+
+* Voltage controlled source that responds to CTRL
+Egen gen_int N VALUE={
++   SIN(6.28318 * Freq * TIME) * (Vpeak - (Vpeak - Vpeak_droop) * V(CTRL))
++ }
+
+Rint gen_int L {Zint}
+
+.ends GENERATOR_DROOP
+
+
+*=============================================================================
+* STM32 MCU Load Model (simplified)
+*=============================================================================
+* Models MCU current draw and brown-out behavior
+* Pins: VDD VSS RESET_OUT
+* RESET_OUT goes low when VDD < BOR threshold
+
+.subckt STM32_LOAD VDD VSS RESET_OUT
+.param Iavg=20m BOR_thresh=2.0
+
+* Current draw (simplified constant load)
+Iload VDD VSS {Iavg}
+
+* Brown-out reset detection
+* RESET_OUT = high (3.3V) when VDD > BOR, low when VDD < BOR
+Ebor RESET_OUT VSS VALUE={
++   3.3 * 0.5 * (1 + tanh(50*(V(VDD,VSS) - BOR_thresh)))
++ }
+
+.ends STM32_LOAD
