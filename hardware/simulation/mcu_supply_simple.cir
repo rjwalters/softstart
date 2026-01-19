@@ -1,0 +1,149 @@
+* Simplified MCU Supply Stability Test
+* =====================================
+* Tests the MCU power supply chain with realistic AC input
+* Uses standard SPICE constructs for reliable simulation
+
+.title MCU Supply Stability - Simplified Model
+
+*=============================================================================
+* Parameters
+*=============================================================================
+.param VRMS=120
+.param FREQ=60
+.param VPEAK={VRMS*1.414}
+
+*=============================================================================
+* Simulation Options for convergence
+*=============================================================================
+.options reltol=0.003 abstol=1e-9 vntol=1e-6 chgtol=1e-14
+.options method=gear maxord=2
+.options itl4=100
+
+*=============================================================================
+* AC Source (Generator)
+*=============================================================================
+Vgen ac_l 0 SIN(0 {VPEAK} {FREQ})
+
+* Generator internal impedance (helps convergence)
+Rgen ac_l ac_l_int 2
+
+*=============================================================================
+* Full-Wave Bridge Rectifier with convergence aids
+*=============================================================================
+D1 ac_l_int rect_pos DRECT
+D2 0 rect_pos DRECT
+D3 0 ac_l_int DRECT
+D4 rect_neg ac_l_int DRECT
+.model DRECT D(Is=1e-9 N=1.8 Rs=0.01 BV=600)
+
+* Snubber capacitors across diodes (helps convergence)
+Csnub1 ac_l_int rect_pos 100p
+Csnub2 0 rect_pos 100p
+
+* Bleed resistor (provides DC path when cap fully charged)
+Rbleed rect_pos rect_neg 100k
+
+* Reference ground for DC side
+Vgnd rect_neg 0 0
+
+*=============================================================================
+* Bulk Capacitor (C8 = 1000uF)
+*=============================================================================
+C_bulk rect_pos 0 1000u IC=150
+
+*=============================================================================
+* 12V Regulator (LM7812 simplified)
+* Simple voltage clamp with dropout
+*=============================================================================
+* Voltage divider model: clamps at 12V when input > 14.5V
+Rreg12_top rect_pos reg12_mid 10k
+Rreg12_bot reg12_mid 0 10k
+
+* Ideal 12V clamp (simplified regulator)
+* When rect_pos > 14.5V, output = 12V
+* When rect_pos < 14.5V, output tracks input minus dropout
+Ereg12 rail_12v 0 VALUE={min(12, max(0, V(rect_pos) - 2.5))}
+
+* Add series resistance for realistic behavior
+Rreg12_out rail_12v rail_12v_out 0.1
+
+* Output capacitor C9
+C9 rail_12v_out 0 10u IC=12
+
+*=============================================================================
+* 3.3V LDO (AMS1117-3.3)
+*=============================================================================
+Ereg33 rail_3v3 0 VALUE={min(3.3, max(0, V(rail_12v_out) - 1.1))}
+
+* Series resistance
+Rreg33_out rail_3v3 rail_3v3_out 0.05
+
+* Output capacitors C1, C2
+C1 rail_3v3_out 0 10u IC=3.3
+C2 rail_3v3_out 0 10u IC=3.3
+
+*=============================================================================
+* Loads
+*=============================================================================
+* MCU load: ~30mA average
+Rmcu rail_3v3_out 0 {3.3/0.030}
+
+* 12V loads: Gate drivers + LED (~50mA total)
+R12v_load rail_12v_out 0 {12/0.050}
+
+*=============================================================================
+* Analysis
+*=============================================================================
+.tran 50u 200m 0 50u uic
+
+.control
+    run
+
+    echo ""
+    echo "=== MCU Supply Stability Results ==="
+    echo ""
+
+    * Key measurements
+    meas tran v_rect_avg AVG v(rect_pos)
+    meas tran v_rect_min MIN v(rect_pos) from=10m to=200m
+    meas tran v_rect_max MAX v(rect_pos) from=10m to=200m
+
+    meas tran v_12v_avg AVG v(rail_12v_out) from=10m to=200m
+    meas tran v_12v_min MIN v(rail_12v_out) from=10m to=200m
+    meas tran v_12v_max MAX v(rail_12v_out) from=10m to=200m
+
+    meas tran v_3v3_avg AVG v(rail_3v3_out) from=10m to=200m
+    meas tran v_3v3_min MIN v(rail_3v3_out) from=10m to=200m
+    meas tran v_3v3_max MAX v(rail_3v3_out) from=10m to=200m
+
+    echo ""
+    echo "=== Ripple Analysis ==="
+    let rect_ripple = v_rect_max - v_rect_min
+    let v12_ripple = v_12v_max - v_12v_min
+    let v33_ripple = v_3v3_max - v_3v3_min
+    echo "Rectified ripple: $&rect_ripple V"
+    echo "12V rail ripple: $&v12_ripple V"
+    echo "3.3V rail ripple: $&v33_ripple V"
+
+    echo ""
+    echo "=== Pass/Fail ==="
+    if v_3v3_min < 2.0
+        echo "FAIL: 3.3V dropped below BOR threshold (2.0V)"
+    else if v_3v3_min < 3.0
+        echo "WARNING: 3.3V dropped below 3.0V (min = $&v_3v3_min V)"
+    else
+        echo "PASS: 3.3V stayed above 3.0V (min = $&v_3v3_min V)"
+    end
+
+    if v_12v_min < 11.0
+        echo "WARNING: 12V dropped below 11.0V - regulator in dropout"
+    else
+        echo "PASS: 12V rail stable (min = $&v_12v_min V)"
+    end
+
+    * Save data
+    wrdata results/mcu_supply_simple.csv v(rect_pos) v(rail_12v_out) v(rail_3v3_out) v(ac_l)
+
+.endc
+
+.end

@@ -1,0 +1,133 @@
+* MCU Supply Low Voltage Test
+* ===========================
+* Tests MCU supply at 60V RMS (severe brownout condition)
+* Determines if MCU supply remains stable
+
+.title MCU Supply - 60V RMS Input Test (50% voltage)
+
+*=============================================================================
+* Parameters - Testing at 60V RMS (50% of nominal 120V)
+*=============================================================================
+.param VRMS=60
+.param FREQ=60
+.param VPEAK={VRMS*1.414}
+
+.options reltol=0.003 abstol=1e-9 vntol=1e-6 chgtol=1e-14
+.options method=gear
+
+*=============================================================================
+* AC Source at reduced voltage
+*=============================================================================
+Vgen ac_l 0 SIN(0 {VPEAK} {FREQ})
+Rgen ac_l ac_l_int 2
+
+*=============================================================================
+* Bridge Rectifier
+*=============================================================================
+D1 ac_l_int rect_pos DRECT
+D2 0 rect_pos DRECT
+D3 0 ac_l_int DRECT
+D4 0 ac_l_int DRECT
+.model DRECT D(Is=1e-9 N=1.8 Rs=0.01 BV=600)
+
+Csnub1 ac_l_int rect_pos 100p
+Csnub2 0 rect_pos 100p
+Rbleed rect_pos 0 100k
+
+*=============================================================================
+* Bulk Capacitor (1000uF)
+*=============================================================================
+C_bulk rect_pos 0 1000u IC={VPEAK*0.9}
+
+*=============================================================================
+* 12V Regulator - outputs 12V when input > 14.5V
+*=============================================================================
+Ereg12 rail_12v 0 VALUE={min(12, max(0, V(rect_pos) - 2.5))}
+Rreg12_out rail_12v rail_12v_out 0.1
+C9 rail_12v_out 0 10u IC=12
+
+*=============================================================================
+* 3.3V LDO - outputs 3.3V when input > 4.4V
+*=============================================================================
+Ereg33 rail_3v3 0 VALUE={min(3.3, max(0, V(rail_12v_out) - 1.1))}
+Rreg33_out rail_3v3 rail_3v3_out 0.05
+C1 rail_3v3_out 0 20u IC=3.3
+
+*=============================================================================
+* Loads
+*=============================================================================
+Rmcu rail_3v3_out 0 {3.3/0.030}
+R12v_load rail_12v_out 0 {12/0.050}
+
+*=============================================================================
+* Analysis
+*=============================================================================
+.tran 50u 200m 0 50u uic
+
+.control
+    run
+
+    echo ""
+    echo "=== MCU Supply at 60V RMS (50% nominal) ==="
+    echo ""
+    echo "This simulates a severe voltage droop condition"
+    echo ""
+
+    meas tran v_rect_avg AVG v(rect_pos) from=50m to=200m
+    meas tran v_rect_min MIN v(rect_pos) from=50m to=200m
+    meas tran v_rect_max MAX v(rect_pos) from=50m to=200m
+
+    meas tran v_12v_avg AVG v(rail_12v_out) from=50m to=200m
+    meas tran v_12v_min MIN v(rail_12v_out) from=50m to=200m
+
+    meas tran v_3v3_avg AVG v(rail_3v3_out) from=50m to=200m
+    meas tran v_3v3_min MIN v(rail_3v3_out) from=50m to=200m
+
+    echo ""
+    echo "=== Ripple Analysis ==="
+    let rect_ripple = v_rect_max - v_rect_min
+    echo "Rectified ripple at 60V RMS: $&rect_ripple V"
+    echo "Rectified voltage range: $&v_rect_min to $&v_rect_max V"
+
+    echo ""
+    echo "=== Regulation Status ==="
+
+    * Check if 12V regulator has headroom
+    let lm7812_headroom = v_rect_min - 14.5
+    echo "LM7812 headroom (min rect - 14.5V): $&lm7812_headroom V"
+
+    if v_rect_min < 14.5
+        echo "WARNING: Rectified voltage drops below LM7812 minimum!"
+        echo "         12V regulator will be in dropout"
+    end
+
+    if v_12v_min < 11.0
+        echo "FAIL: 12V rail below 11V - regulator in dropout"
+    else
+        echo "PASS: 12V rail stable at $&v_12v_min V"
+    end
+
+    if v_3v3_min < 2.0
+        echo "FAIL: 3.3V below MCU brown-out threshold!"
+    else if v_3v3_min < 3.0
+        echo "WARNING: 3.3V below 3.0V (actual: $&v_3v3_min V)"
+    else
+        echo "PASS: 3.3V rail stable at $&v_3v3_min V"
+    end
+
+    echo ""
+    echo "=== Conclusion ==="
+    if v_3v3_min > 3.0
+        echo "MCU supply remains stable even at 50% voltage (60V RMS)"
+        echo "Design has excellent low-voltage margin"
+    else if v_3v3_min > 2.0
+        echo "MCU stays powered but with reduced voltage margin"
+    else
+        echo "MCU will brown-out reset at this voltage level"
+    end
+
+    wrdata results/mcu_supply_lowvoltage.csv v(rect_pos) v(rail_12v_out) v(rail_3v3_out) v(ac_l)
+
+.endc
+
+.end
