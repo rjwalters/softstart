@@ -69,11 +69,9 @@ def get_placements() -> dict[str, tuple[float, float, float]]:
     PWR_X = 165
     PWR_Y = 12
 
-    # 12V supply
-    p["D5"] = (PWR_X - 25, PWR_Y, 0)       # Bridge rectifier MB6S
-    p["C8"] = (PWR_X - 12, PWR_Y + 10, 0)  # 1000uF 25V bulk cap (10mm radial)
-    p["U7"] = (PWR_X, PWR_Y, 0)            # LM7812
-    p["C9"] = (PWR_X + 12, PWR_Y + 8, 0)   # 10uF output cap
+    # 12V supply - HLK-PM12 AC-DC module (34mm x 20mm)
+    p["PS1"] = (PWR_X - 10, PWR_Y + 5, 0)  # HLK-PM12 AC-DC module
+    p["C9"] = (PWR_X + 15, PWR_Y + 5, 0)   # 10uF output bypass cap
 
     # 3.3V supply (shifted down to avoid gate drivers)
     p["U8"] = (PWR_X - 15, PWR_Y + 22, 0)  # AMS1117-3.3

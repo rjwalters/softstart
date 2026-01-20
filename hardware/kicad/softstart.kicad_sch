@@ -3996,32 +3996,32 @@
     )
   )
   (symbol
-    (lib_id "Diode_Bridge:MB6S")
-    (at 139.7 35.56 0)
+    (lib_id "Converter_ACDC:HLK-PM12")
+    (at 160 35.56 0)
     (unit 1)
     (exclude_from_sim no)
     (in_bom yes)
     (on_board yes)
     (dnp no)
     (uuid "47b5b477-a6d7-44d3-98f6-5959300f6e05")
-    (property "Reference" "D5"
-      (at 139.7 30.48 0)
+    (property "Reference" "PS1"
+      (at 160 27.94 0)
       (effects
         (font
           (size 1.27 1.27)
         )
       )
     )
-    (property "Value" "MB6S"
-      (at 139.7 33.02 0)
+    (property "Value" "HLK-PM12"
+      (at 160 30.48 0)
       (effects
         (font
           (size 1.27 1.27)
         )
       )
     )
-    (property "Footprint" "Package_TO_SOT_SMD:TO-269AA"
-      (at 139.7 35.56 0)
+    (property "Footprint" "Converter_ACDC:Converter_ACDC_Hi-Link_HLK-PMxx"
+      (at 160 35.56 0)
       (effects
         (font
           (size 1.27 1.27)
@@ -4030,7 +4030,7 @@
       )
     )
     (property "Datasheet" "~"
-      (at 139.7 35.56 0)
+      (at 160 35.56 0)
       (effects
         (font
           (size 1.27 1.27)
@@ -4038,127 +4038,17 @@
         (hide yes)
       )
     )
-    (pin "4" (uuid "acf0a067-6a59-41af-a4df-90d994dd6175")
+    (pin "1" (uuid "acf0a067-6a59-41af-a4df-90d994dd6175")
     )
     (pin "2" (uuid "cb9f999f-cdde-4d1e-8227-6f33738c6aca")
     )
-    (pin "1" (uuid "562bfde6-6b5e-4e5d-9989-dac22181bc0e")
+    (pin "3" (uuid "562bfde6-6b5e-4e5d-9989-dac22181bc0e")
     )
-    (pin "3" (uuid "b4ca823d-ae61-415d-97cc-c8093684b633")
-    )
-    (instances
-      (project "project"
-        (path "/fc5ef2a6-3fb0-4506-a0b3-b668935dcba5" (reference "D5") (unit 1)
-        )
-      )
-    )
-  )
-  (symbol
-    (lib_id "Device:C")
-    (at 165.1 44.45 0)
-    (unit 1)
-    (exclude_from_sim no)
-    (in_bom yes)
-    (on_board yes)
-    (dnp no)
-    (uuid "b969d599-655b-40cd-a964-584a0281abad")
-    (property "Reference" "C8"
-      (at 165.1 39.37 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-      )
-    )
-    (property "Value" "1000uF 25V"
-      (at 165.1 41.91 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-      )
-    )
-    (property "Footprint" "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm"
-      (at 165.1 44.45 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-        (hide yes)
-      )
-    )
-    (property "Datasheet" "~"
-      (at 165.1 44.45 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-        (hide yes)
-      )
-    )
-    (pin "1" (uuid "fffdd3f0-f490-4f70-8c48-70118ffa6f2c")
-    )
-    (pin "2" (uuid "a6759928-daf8-4eff-b388-7016c0943c4d")
+    (pin "4" (uuid "b4ca823d-ae61-415d-97cc-c8093684b633")
     )
     (instances
       (project "project"
-        (path "/fc5ef2a6-3fb0-4506-a0b3-b668935dcba5" (reference "C8") (unit 1)
-        )
-      )
-    )
-  )
-  (symbol
-    (lib_id "Regulator_Linear:L7812")
-    (at 190.5 35.56 0)
-    (unit 1)
-    (exclude_from_sim no)
-    (in_bom yes)
-    (on_board yes)
-    (dnp no)
-    (uuid "a0b48169-f8e2-4237-89b7-769db8f0ec2f")
-    (property "Reference" "U7"
-      (at 190.5 30.48 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-      )
-    )
-    (property "Value" "LM7812"
-      (at 190.5 33.02 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-      )
-    )
-    (property "Footprint" "Package_TO_SOT_THT:TO-220-3_Vertical"
-      (at 190.5 35.56 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-        (hide yes)
-      )
-    )
-    (property "Datasheet" "~"
-      (at 190.5 35.56 0)
-      (effects
-        (font
-          (size 1.27 1.27)
-        )
-        (hide yes)
-      )
-    )
-    (pin "1" (uuid "384a5da1-a547-4454-9f75-9cda88c53021")
-    )
-    (pin "2" (uuid "79e26334-9a61-468f-b4ae-11e110d3044e")
-    )
-    (pin "3" (uuid "1c8d7097-5cd3-420e-80fe-e6b9ef4e46c3")
-    )
-    (instances
-      (project "project"
-        (path "/fc5ef2a6-3fb0-4506-a0b3-b668935dcba5" (reference "U7") (unit 1)
+        (path "/fc5ef2a6-3fb0-4506-a0b3-b668935dcba5" (reference "PS1") (unit 1)
         )
       )
     )
